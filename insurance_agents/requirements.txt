@@ -5,9 +5,23 @@
 azure-cosmos>=4.5.0
 azure-identity>=1.15.0
 
+# FastAPI and web framework
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.0
+
+# HTTP client for A2A communication
+aiohttp==3.9.1
+
+# AI and agent framework
+semantic-kernel==0.9.0
+
 # Data processing
 pandas>=2.0.0
 python-dotenv>=1.0.0
+
+# Terminal output formatting
+colorama==0.4.6
 
 # MCP Protocol
 mcp[cli]>=1.0.0

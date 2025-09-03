@@ -1,0 +1,1 @@
+cd insurance_agents;.venv/scripts/activate;$env:PYTHONPATH = "D:\Metakaal\insurance\insurance_agents"
