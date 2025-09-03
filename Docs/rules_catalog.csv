@@ -1,0 +1,5 @@
+ruleId,description
+OP_DOC_REQUIRED,Outpatient claims must include memo/report/tests and bill
+IP_DISCHARGE_REQUIRED,Inpatient claims must include discharge summary with admit/release dates
+CAP_DENTAL_1000,Dental annual coverage cap is 1000
+EXCLUDED_LASIK,LASIK is excluded from coverage

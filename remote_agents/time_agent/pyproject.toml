@@ -1,0 +1,17 @@
+[project]
+name = "time-agent"
+version = "0.1.0"
+description = "A2A Time Agent with Cosmos DB logging via Azure MCP Server"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "a2a-sdk>=0.3.0",
+    "mcp>=1.9.4",
+    "azure-ai-agents>=1.1.0b1",
+    "semantic-kernel>=1.33.0",
+    "python-dotenv>=1.0.0",
+    "httpx>=0.25.0",
+    "click>=8.0.0",
+    "uvicorn>=0.20.0",
+    "azure-cosmos>=4.9.0",
+]

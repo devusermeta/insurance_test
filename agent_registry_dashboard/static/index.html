@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Azure AI Foundry Multi-Agent Registry</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #0078d4 0%, #106ebe 50%, #005a9e 100%);
+            min-height: 100vh;
+            color: #333;
+            overflow-x: hidden;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 1rem 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .logo i {
+            font-size: 2rem;
+            color: #fff;
+            background: linear-gradient(45deg, #0078d4, #00bcf2);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo h1 {
+            color: white;
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        .logo .subtitle {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 0.85rem;
+            font-weight: 400;
+            margin-left: 0.5rem;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(45deg, #0078d4, #005a9e);
+            color: white;
+            border: 2px solid transparent;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 120, 212, 0.3);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .btn-warning {
+            background: rgba(220, 53, 69, 0.8);
+            color: white;
+            border: 2px solid rgba(220, 53, 69, 0.2);
+            backdrop-filter: blur(10px);
+        }
+
+        .btn-warning:hover {
+            background: rgba(220, 53, 69, 1);
+            border-color: rgba(220, 53, 69, 0.5);
+        }
+
+        .main-content {
+            padding: 3rem 0;
+        }
+
+        .dashboard-header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        .dashboard-title {
+            font-size: 3rem;
+            font-weight: 700;
+            color: white;
+            margin-bottom: 1rem;
+            text-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .dashboard-subtitle {
+            font-size: 1.2rem;
+            color: rgba(255, 255, 255, 0.9);
+            margin-bottom: 0.5rem;
+        }
+
+        .azure-badge {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            margin-top: 1rem;
+            backdrop-filter: blur(10px);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 3rem;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px);
+            border-radius: 20px;
+            padding: 2rem;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.05) 0%, transparent 70%);
+            transform: rotate(0deg);
+            animation: shimmer 4s ease-in-out infinite;
+        }
+
+        @keyframes shimmer {
+
+            0%,
+            100% {
+                transform: rotate(0deg);
+            }
+
+            50% {
+                transform: rotate(180deg);
+            }
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .stat-icon {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            display: block;
+            position: relative;
+            z-index: 1;
+        }
+
+        .stat-icon.online {
+            color: #00d4aa;
+        }
+
+        .stat-icon.offline {
+            color: #ff6b6b;
+        }
+
+        .stat-icon.total {
+            color: #0078d4;
+        }
+
+        .stat-icon.azure {
+            color: #00bcf2;
+        }
+
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: white;
+            display: block;
+            margin-bottom: 0.5rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .stat-label {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .agents-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .agent-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .agent-card:hover {
+            transform: translateY(-10px) scale(1.02);
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+        }
+
+        .agent-card-header {
+            padding: 1.5rem;
+            background: linear-gradient(135deg, #0078d4, #005a9e);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .agent-card-header.host-agent {
+            background: linear-gradient(135deg, #0078d4, #106ebe);
+        }
+
+        .agent-card-header.playwright-agent {
+            background: linear-gradient(135deg, #2dd4bf, #0891b2);
+        }
+
+        .agent-card-header.tool-agent {
+            background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+        }
+
+        .agent-card-header.mcp-server {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+        }
+
+        .agent-card-header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.15) 0%, transparent 70%);
+            animation: shimmer 4s ease-in-out infinite;
+        }
+
+        .agent-name {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: white;
+            margin-bottom: 0.5rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .agent-url {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.9rem;
+            font-family: 'Courier New', monospace;
+            position: relative;
+            z-index: 1;
+        }
+
+        .agent-status {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            z-index: 2;
+        }
+
+        .agent-status.online {
+            background: #00d4aa;
+            box-shadow: 0 0 15px rgba(0, 212, 170, 0.6);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .agent-status.offline {
+            background: #ff6b6b;
+            animation: none;
+        }
+
+        .agent-status.error {
+            background: #fbbf24;
+            animation: blink 1s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+
+            50% {
+                transform: scale(1.3);
+                opacity: 0.7;
+            }
+        }
+
+        @keyframes blink {
+
+            0%,
+            50%,
+            100% {
+                opacity: 1;
+            }
+
+            25%,
+            75% {
+                opacity: 0.5;
+            }
+        }
+
+        .agent-card-body {
+            padding: 1.5rem;
+        }
+
+        .agent-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .info-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .info-icon {
+            width: 20px;
+            text-align: center;
+            color: #0078d4;
+        }
+
+        .agent-skills {
+            margin-bottom: 1.5rem;
+        }
+
+        .skills-header {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .skills-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .skill-tag {
+            background: linear-gradient(45deg, #0078d4, #005a9e);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .skill-tag.azure {
+            background: linear-gradient(45deg, #00bcf2, #0078d4);
+        }
+
+        .skill-tag.mcp {
+            background: linear-gradient(45deg, #f59e0b, #d97706);
+        }
+
+        .skill-tag.playwright {
+            background: linear-gradient(45deg, #2dd4bf, #0891b2);
+        }
+
+        .agent-actions {
+            display: flex;
+            gap: 0.75rem;
+            justify-content: flex-end;
+        }
+
+        .btn-small {
+            padding: 0.5rem 1rem;
+            font-size: 0.8rem;
+            border-radius: 8px;
+        }
+
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 4rem;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .error-message {
+            text-align: center;
+            padding: 2rem;
+            color: white;
+            background: rgba(248, 113, 113, 0.2);
+            border-radius: 12px;
+            margin: 2rem 0;
+            backdrop-filter: blur(10px);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            background: white;
+            margin: 3% auto;
+            padding: 0;
+            border-radius: 20px;
+            width: 90%;
+            max-width: 700px;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-header {
+            background: linear-gradient(135deg, #0078d4, #005a9e);
+            color: white;
+            padding: 2rem;
+            border-radius: 20px 20px 0 0;
+            position: relative;
+        }
+
+        .modal-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .close {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            color: white;
+            font-size: 2rem;
+            cursor: pointer;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.3s;
+        }
+
+        .close:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .modal-body {
+            padding: 2rem;
+        }
+
+        .detail-section {
+            margin-bottom: 2rem;
+        }
+
+        .detail-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .detail-label {
+            font-weight: 600;
+            color: #666;
+        }
+
+        .detail-value {
+            color: #333;
+        }
+
+        .code-block {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 1rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            overflow-x: auto;
+        }
+
+        .azure-info {
+            background: linear-gradient(135deg, #0078d4, #00bcf2);
+            color: white;
+            padding: 1rem;
+            border-radius: 12px;
+            margin: 1rem 0;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 0 1rem;
+            }
+
+            .dashboard-title {
+                font-size: 2rem;
+            }
+
+            .agents-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .agent-info {
+                grid-template-columns: 1fr;
+            }
+
+            .header-content {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .logo h1 {
+                font-size: 1.2rem;
+            }
+
+            .logo .subtitle {
+                font-size: 0.75rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fab fa-microsoft"></i>
+                    <div>
+                        <h1>Azure AI Foundry Multi-Agent Registry</h1>
+                        <span class="subtitle">Powered by A2A Protocol & Semantic Kernel</span>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <button class="btn btn-secondary" onclick="refreshAgents()">
+                        <i class="fas fa-sync-alt"></i>
+                        Refresh
+                    </button>
+                    <button class="btn btn-primary" onclick="showAddAgentDialog()">
+                        <i class="fas fa-plus"></i>
+                        Add Agent
+                    </button>
+                    <button class="btn btn-warning" onclick="showRemoveAgentDialog()">
+                        <i class="fas fa-trash-alt"></i>
+                        Remove Agent
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="main-content">
+        <div class="container">
+            <div class="dashboard-header">
+                <h1 class="dashboard-title">Multi-Agent System Dashboard</h1>
+                <p class="dashboard-subtitle">
+                    Monitor your Azure AI Foundry powered multi-agent ecosystem
+                </p>
+                <div class="azure-badge">
+                    <i class="fab fa-microsoft"></i>
+                    Azure AI Foundry + A2A Protocol + MCP
+                </div>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <i class="fas fa-server stat-icon total"></i>
+                    <span class="stat-number" id="totalAgents">0</span>
+                    <span class="stat-label">Total Agents</span>
+                </div>
+                <div class="stat-card">
+                    <i class="fas fa-check-circle stat-icon online"></i>
+                    <span class="stat-number" id="onlineAgents">0</span>
+                    <span class="stat-label">Online</span>
+                </div>
+                <div class="stat-card">
+                    <i class="fas fa-times-circle stat-icon offline"></i>
+                    <span class="stat-number" id="offlineAgents">0</span>
+                    <span class="stat-label">Offline</span>
+                </div>
+                <div class="stat-card">
+                    <i class="fab fa-microsoft stat-icon azure"></i>
+                    <span class="stat-number" id="azureAgents">1</span>
+                    <span class="stat-label">Azure AI Agents</span>
+                </div>
+            </div>
+
+            <div id="loadingSpinner" class="loading">
+                <div class="spinner"></div>
+            </div>
+
+            <div id="errorMessage" class="error-message" style="display: none;"></div>
+
+            <div id="agentsGrid" class="agents-grid" style="display: none;">
+                <!-- Agent cards will be dynamically inserted here -->
+            </div>
+        </div>
+    </main>
+
+    <!-- Agent Details Modal -->
+    <div id="agentModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="modalAgentName">Agent Details</h2>
+                <span class="close" onclick="closeModal()">&times;</span>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Agent details will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Remove Agent Modal -->
+    <div id="removeAgentModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Remove Agent</h2>
+                <span class="close" onclick="closeRemoveModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Select an agent to remove from the registry:</p>
+                <div style="margin: 1rem 0;">
+                    <select id="agentSelect"
+                        style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 8px; font-size: 1rem;">
+                        <option value="">-- Select an agent --</option>
+                    </select>
+                </div>
+                <div style="margin-top: 1rem;">
+                    <p style="color: #dc3545; font-size: 0.9rem; margin-bottom: 1rem;">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Warning: This action cannot be undone. The agent will be removed from the registry.
+                    </p>
+                </div>
+                <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+                    <button class="btn btn-secondary" onclick="closeRemoveModal()">Cancel</button>
+                    <button class="btn btn-warning" onclick="confirmRemoveAgent()">Remove Agent</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let agents = [];
+        let refreshInterval;
+
+        // Initialize the dashboard
+        document.addEventListener('DOMContentLoaded', function () {
+            loadAgents();
+            // Auto-refresh every 30 seconds
+            refreshInterval = setInterval(loadAgents, 30000);
+        });
+
+        // Load agents from the API
+        async function loadAgents() {
+            try {
+                const response = await fetch('/api/agents');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                agents = data.agents;
+
+                updateStats();
+                renderAgents();
+
+                document.getElementById('loadingSpinner').style.display = 'none';
+                document.getElementById('agentsGrid').style.display = 'grid';
+                document.getElementById('errorMessage').style.display = 'none';
+
+            } catch (error) {
+                console.error('Error loading agents:', error);
+                showError('Failed to load agents. Please check your connection and try again.');
+                document.getElementById('loadingSpinner').style.display = 'none';
+            }
+        }
+
+        // Update statistics
+        function updateStats() {
+            const totalAgents = agents.length;
+            const onlineAgents = agents.filter(agent => agent.status === 'online').length;
+            const offlineAgents = totalAgents - onlineAgents;
+            const azureAgents = agents.filter(agent => agent.name.includes('Host Agent')).length;
+
+            document.getElementById('totalAgents').textContent = totalAgents;
+            document.getElementById('onlineAgents').textContent = onlineAgents;
+            document.getElementById('offlineAgents').textContent = offlineAgents;
+            document.getElementById('azureAgents').textContent = azureAgents;
+        }
+
+        // Render agent cards
+        function renderAgents() {
+            const grid = document.getElementById('agentsGrid');
+            grid.innerHTML = '';
+
+            agents.forEach(agent => {
+                const card = createAgentCard(agent);
+                grid.appendChild(card);
+            });
+        }
+
+        // Create a single agent card
+        function createAgentCard(agent) {
+            const card = document.createElement('div');
+            card.className = 'agent-card';
+            card.onclick = () => showAgentDetails(agent.name);
+
+            const statusClass = agent.status;
+            const responseTime = agent.response_time ? `${Math.round(agent.response_time)}ms` : 'N/A';
+            const lastChecked = new Date(agent.last_checked).toLocaleTimeString();
+
+            // Determine agent type for styling and skills
+            const agentType = getAgentType(agent.name);
+            const headerClass = getHeaderClass(agent.name);
+            const skills = getAgentSkills(agent.name);
+
+            card.innerHTML = `
+                <div class="agent-card-header ${headerClass}">
+                    <div class="agent-status ${statusClass}"></div>
+                    <h3 class="agent-name">${agent.name}</h3>
+                    <p class="agent-url">${agent.url}</p>
+                </div>
+                <div class="agent-card-body">
+                    <div class="agent-info">
+                        <div class="info-item">
+                            <i class="fas fa-heartbeat info-icon"></i>
+                            <span>Status: ${agent.status.toUpperCase()}</span>
+                        </div>
+                        <div class="info-item">
+                            <i class="fas fa-stopwatch info-icon"></i>
+                            <span>Response: ${responseTime}</span>
+                        </div>
+                        <div class="info-item">
+                            <i class="fas fa-clock info-icon"></i>
+                            <span>Checked: ${lastChecked}</span>
+                        </div>
+                        <div class="info-item">
+                            <i class="fas fa-cog info-icon"></i>
+                            <span>Type: ${agentType}</span>
+                        </div>
+                    </div>
+                    <div class="agent-skills">
+                        <div class="skills-header">
+                            <i class="fas fa-magic"></i>
+                            <span>Capabilities</span>
+                        </div>
+                        <div class="skills-list">
+                            ${skills.map(skill => `<span class="skill-tag ${skill.class}">${skill.name}</span>`).join('')}
+                        </div>
+                    </div>
+                    <div class="agent-actions">
+                        <button class="btn btn-primary btn-small" onclick="event.stopPropagation(); showAgentDetails('${agent.name}')">
+                            <i class="fas fa-info-circle"></i>
+                            Details
+                        </button>
+                        <button class="btn btn-secondary btn-small" onclick="event.stopPropagation(); testAgent('${agent.name}')">
+                            <i class="fas fa-vial"></i>
+                            Test
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            return card;
+        }
+
+        // Get agent type for display
+        function getAgentType(agentName) {
+            if (agentName.includes('Host')) return 'Azure AI Foundry';
+            if (agentName.includes('Playwright')) return 'Web Automation';
+            if (agentName.includes('Tool')) return 'Development Tools';
+            if (agentName.includes('MCP')) return 'MCP Server';
+            return 'A2A Agent';
+        }
+
+        // Get header class for styling
+        function getHeaderClass(agentName) {
+            if (agentName.includes('Host')) return 'host-agent';
+            if (agentName.includes('Playwright')) return 'playwright-agent';
+            if (agentName.includes('Tool')) return 'tool-agent';
+            if (agentName.includes('MCP')) return 'mcp-server';
+            return '';
+        }
+
+        // Get agent skills for display
+        function getAgentSkills(agentName) {
+            const commonSkills = [
+                { name: 'A2A Protocol', class: '' },
+                { name: 'REST API', class: '' }
+            ];
+
+            if (agentName.includes('Host')) {
+                return [
+                    { name: 'Azure AI Foundry', class: 'azure' },
+                    { name: 'Semantic Kernel', class: 'azure' },
+                    { name: 'Task Routing', class: '' },
+                    ...commonSkills
+                ];
+            } else if (agentName.includes('Playwright')) {
+                return [
+                    { name: 'Web Automation', class: 'playwright' },
+                    { name: 'Screenshots', class: 'playwright' },
+                    { name: 'MCP Tools', class: 'mcp' },
+                    ...commonSkills
+                ];
+            } else if (agentName.includes('Tool')) {
+                return [
+                    { name: 'Git Operations', class: 'mcp' },
+                    { name: 'VSCode Integration', class: 'mcp' },
+                    { name: 'Dev Tools', class: 'mcp' },
+                    ...commonSkills
+                ];
+            } else if (agentName.includes('MCP')) {
+                return [
+                    { name: 'MCP Protocol', class: 'mcp' },
+                    { name: 'SSE Support', class: 'mcp' },
+                    { name: 'Azure Functions', class: 'azure' },
+                    { name: 'Health Check', class: '' }
+                ];
+            }
+
+            return commonSkills;
+        }
+
+        // Show detailed agent information
+        async function showAgentDetails(agentName) {
+            try {
+                const response = await fetch(`/api/agents/${agentName}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                const agent = data.status;
+                const agentCard = data.agent_card;
+
+                document.getElementById('modalAgentName').textContent = agent.name;
+
+                let modalContent = `
+                    <div class="detail-section">
+                        <h3 class="detail-title">
+                            <i class="fas fa-server"></i>
+                            Connection Details
+                        </h3>
+                        <div class="detail-grid">
+                            <span class="detail-label">URL:</span>
+                            <span class="detail-value">${agent.url}</span>
+                            <span class="detail-label">Status:</span>
+                            <span class="detail-value">
+                                <i class="fas fa-circle" style="color: ${agent.status === 'online' ? '#00d4aa' : '#ff6b6b'}"></i>
+                                ${agent.status.toUpperCase()}
+                            </span>
+                            <span class="detail-label">Response Time:</span>
+                            <span class="detail-value">${agent.response_time ? Math.round(agent.response_time) + 'ms' : 'N/A'}</span>
+                            <span class="detail-label">Last Checked:</span>
+                            <span class="detail-value">${new Date(agent.last_checked).toLocaleString()}</span>
+                        </div>
+                        ${agent.error_message ? `
+                            <div style="margin-top: 1rem;">
+                                <span class="detail-label">Error Message:</span>
+                                <div class="code-block" style="margin-top: 0.5rem; color: #dc3545;">
+                                    ${agent.error_message}
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+
+                // Add Azure-specific information
+                if (agent.name.includes('Host')) {
+                    modalContent += `
+                        <div class="azure-info">
+                            <h4><i class="fab fa-microsoft"></i> Azure AI Foundry Integration</h4>
+                            <p>This agent uses Azure AI Foundry for intelligent task routing and delegation to specialized remote agents via A2A protocol.</p>
+                        </div>
+                    `;
+                }
+
+                if (agentCard && Object.keys(agentCard).length > 0) {
+                    modalContent += `
+                        <div class="detail-section">
+                            <h3 class="detail-title">
+                                <i class="fas fa-id-card"></i>
+                                Agent Card
+                            </h3>
+                            <div class="detail-grid">
+                                <span class="detail-label">Name:</span>
+                                <span class="detail-value">${agentCard.name || 'N/A'}</span>
+                                <span class="detail-label">Version:</span>
+                                <span class="detail-value">${agentCard.version || 'N/A'}</span>
+                                <span class="detail-label">Description:</span>
+                                <span class="detail-value">${agentCard.description || 'N/A'}</span>
+                                <span class="detail-label">Input Mode:</span>
+                                <span class="detail-value">${agentCard.defaultInputModes ? agentCard.defaultInputModes.join(', ') : 'Unknown'}</span>
+                                <span class="detail-label">Output Mode:</span>
+                                <span class="detail-value">${agentCard.defaultOutputModes ? agentCard.defaultOutputModes.join(', ') : 'Unknown'}</span>
+                                <span class="detail-label">Identity Mode:</span>
+                                <span class="detail-value">${agentCard.identity_mode || 'Unknown'}</span>
+                                <span class="detail-label">Authorization Token:</span>
+                                <span class="detail-value">${agentCard.authorization_token ? '••••••••' : 'Unknown'}</span>
+                            </div>
+                            
+                            ${agentCard.capabilities ? `
+                                <div style="margin-top: 1rem;">
+                                    <span class="detail-label">Capabilities:</span>
+                                    <div class="code-block" style="margin-top: 0.5rem;">
+                                        ${JSON.stringify(agentCard.capabilities, null, 2)}
+                                    </div>
+                                </div>
+                            ` : ''}
+                            
+                            ${agentCard.skills && agentCard.skills.length > 0 ? `
+                                <div style="margin-top: 1rem;">
+                                    <span class="detail-label">Skills:</span>
+                                    <div style="margin-top: 0.5rem;">
+                                        ${agentCard.skills.map(skill => `
+                                            <div class="code-block" style="margin-bottom: 1rem;">
+                                                <strong>${skill.name}</strong><br>
+                                                <em>${skill.description}</em><br>
+                                                ${skill.examples ? `Examples: ${skill.examples.join(', ')}` : ''}
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                } else {
+                    modalContent += `
+                        <div class="detail-section">
+                            <h3 class="detail-title">
+                                <i class="fas fa-id-card"></i>
+                                Agent Card
+                            </h3>
+                            <p style="color: #666; font-style: italic;">
+                                No agent card information available. 
+                                ${agent.name.includes('Host') ? 'Gradio applications do not typically expose agent cards.' : 'The agent may not be responding to A2A protocol requests.'}
+                            </p>
+                        </div>
+                    `;
+                }
+
+                document.getElementById('modalBody').innerHTML = modalContent;
+                document.getElementById('agentModal').style.display = 'block';
+
+            } catch (error) {
+                console.error('Error loading agent details:', error);
+                showError('Failed to load agent details.');
+            }
+        }
+
+        // Close modal
+        function closeModal() {
+            document.getElementById('agentModal').style.display = 'none';
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function (event) {
+            const agentModal = document.getElementById('agentModal');
+            const removeModal = document.getElementById('removeAgentModal');
+
+            if (event.target == agentModal) {
+                agentModal.style.display = 'none';
+            }
+            if (event.target == removeModal) {
+                removeModal.style.display = 'none';
+            }
+        }
+
+        // Test agent connectivity
+        async function testAgent(agentName) {
+            try {
+                const response = await fetch(`/api/agents/${agentName}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                const status = data.status.status;
+
+                if (status === 'online') {
+                    alert(`✅ Agent "${agentName}" is online and responding!`);
+                } else {
+                    alert(`❌ Agent "${agentName}" is ${status}. Check the agent details for more information.`);
+                }
+
+                // Refresh the agents list
+                loadAgents();
+
+            } catch (error) {
+                console.error('Error testing agent:', error);
+                alert(`❌ Failed to test agent "${agentName}". ${error.message}`);
+            }
+        }
+
+        // Refresh agents manually
+        function refreshAgents() {
+            document.getElementById('loadingSpinner').style.display = 'flex';
+            document.getElementById('agentsGrid').style.display = 'none';
+            loadAgents();
+        }
+
+        // Show error message
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('errorMessage').style.display = 'block';
+        }
+
+        // Add agent dialog
+        function showAddAgentDialog() {
+            const name = prompt('Enter agent name:');
+            if (!name) return;
+
+            const url = prompt('Enter agent URL:');
+            if (!url) return;
+
+            addAgent(name, url);
+        }
+
+        // Add new agent
+        async function addAgent(name, url) {
+            try {
+                const response = await fetch('/api/agents', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `name=${encodeURIComponent(name)}&url=${encodeURIComponent(url)}`
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                alert(`Agent "${name}" added successfully!`);
+                loadAgents();
+
+            } catch (error) {
+                console.error('Error adding agent:', error);
+                alert(`Failed to add agent "${name}". ${error.message}`);
+            }
+        }
+
+        // Remove agent dialog functions
+        function showRemoveAgentDialog() {
+            // Populate the select dropdown with current agents
+            const agentSelect = document.getElementById('agentSelect');
+            agentSelect.innerHTML = '<option value="">-- Select an agent --</option>';
+
+            agents.forEach(agent => {
+                const option = document.createElement('option');
+                option.value = agent.name;
+                option.textContent = agent.name;
+                agentSelect.appendChild(option);
+            });
+
+            document.getElementById('removeAgentModal').style.display = 'block';
+        }
+
+        function closeRemoveModal() {
+            document.getElementById('removeAgentModal').style.display = 'none';
+        }
+
+        async function confirmRemoveAgent() {
+            const agentSelect = document.getElementById('agentSelect');
+            const selectedAgent = agentSelect.value;
+
+            if (!selectedAgent) {
+                alert('Please select an agent to remove.');
+                return;
+            }
+
+            // Double confirmation
+            if (!confirm(`Are you sure you want to remove "${selectedAgent}" from the registry?\n\nThis action cannot be undone.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/agents/${encodeURIComponent(selectedAgent)}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                alert(`Agent "${selectedAgent}" removed successfully!`);
+                closeRemoveModal();
+                loadAgents();
+
+            } catch (error) {
+                console.error('Error removing agent:', error);
+                alert(`Failed to remove agent "${selectedAgent}". ${error.message}`);
+            }
+        }
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function () {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+        });
+    </script>
+</body>
+
+</html>
