@@ -13,6 +13,12 @@ python-dotenv>=1.0.0
 mcp[cli]>=1.0.0
 fastmcp>=0.3.0
 
+# Web Dashboard
+fastapi>=0.104.0
+uvicorn>=0.24.0
+aiohttp>=3.9.0
+pydantic>=2.5.0
+
 # Semantic Kernel (for Azure AI Foundry agents)
 semantic-kernel>=1.0.0
 

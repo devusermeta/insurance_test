@@ -1,9 +1,9 @@
 """
-Central Agent Registry Dashboard for Azure AI Foundry Multi-Agent System
+Insurance Claims Processing Agent Registry Dashboard
 
-A modern web dashboard for managing and monitoring A2A agents in the Azure AI Foundry
-multi-agent system. This dashboard provides a centralized view of all registered agents, 
-their capabilities, and real-time status monitoring.
+A modern web dashboard for managing and monitoring insurance claims processing agents.
+This dashboard provides a centralized view of all registered insurance agents, 
+their capabilities, real-time status monitoring, and agent registration/removal.
 """
 
 import asyncio
@@ -37,47 +37,37 @@ class AgentStatus(BaseModel):
 
 
 class AgentRegistry:
-    """Central registry for managing Azure AI Foundry multi-agent system"""
+    """Central registry for managing Insurance Claims Processing multi-agent system"""
     
     def __init__(self):
         self.agents: Dict[str, AgentStatus] = {}
         self.agent_cards: Dict[str, Dict] = {}
         
-        # Azure AI Foundry Multi-Agent System configuration
+        # Insurance Claims Processing Multi-Agent System configuration
         self.default_agents = [
             {
-                "name": "Host Agent",
-                "url": "http://localhost:8083",  # Actual Gradio port for this agent
-                "description": "Central routing agent with Azure AI Foundry integration"
+                "name": "ClaimsAssist Orchestrator",
+                "url": "http://localhost:8001",
+                "description": "Main orchestrator for insurance claims workflow - plans DAG, routes work, aggregates results"
             },
             {
-                "name": "Playwright Agent",
-                "url": "http://localhost:10001",
-                "description": "Web automation agent using Playwright and MCP"
+                "name": "Claims Intake Clarifier",
+                "url": "http://localhost:8002",
+                "description": "Validates claim submissions for completeness and consistency, flags gaps or mismatches"
             },
             {
-                "name": "Tool Agent",
-                "url": "http://localhost:10002", 
-                "description": "Development tools agent with git and VSCode integration"
+                "name": "Document Intelligence",
+                "url": "http://localhost:8003", 
+                "description": "Processes documents, extracts structured facts with evidence spans for claims"
             },
             {
-                "name": "Time Agent",
-                "url": "http://localhost:10003",
-                "description": "Date/time utilities and scheduling"
-            },
-            {
-                "name": "Cosmos Query Agent",
-                "url": "http://localhost:10004",
-                "description": "Queries Azure Cosmos DB via A2A"
-            },
-            # {
-            #     "name": "Cosmos MCP Server",
-            #     "url": "http://localhost:8080",
-            #     "description": "Model Context Protocol server for Azure Cosmos DB"
-            # }
+                "name": "Coverage Rules Engine",
+                "url": "http://localhost:8004",
+                "description": "Evaluates benefit and policy rules against extracted facts, proposes approve/deny/pend"
+            }
         ]
         
-        # Initialize with default agents
+        # Initialize with default insurance agents
         for agent_config in self.default_agents:
             self.agents[agent_config["name"]] = AgentStatus(
                 name=agent_config["name"],
@@ -226,8 +216,8 @@ registry = AgentRegistry()
 
 # Create FastAPI app
 app = FastAPI(
-    title="Azure AI Foundry Multi-Agent Registry Dashboard",
-    description="Central dashboard for monitoring and managing Azure AI Foundry multi-agent system",
+    title="Insurance Claims Processing Agent Registry",
+    description="Central dashboard for monitoring and managing insurance claims processing agents",
     version="1.0.0"
 )
 
@@ -343,7 +333,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "app:app",
         host="0.0.0.0",
-    port=3000,
+        port=5000,
         reload=True,
         log_level="info"
     )
