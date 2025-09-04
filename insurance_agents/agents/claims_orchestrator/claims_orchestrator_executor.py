@@ -19,6 +19,7 @@ from shared.mcp_config import A2A_AGENT_PORTS
 from shared.mcp_client import MCPClient
 from shared.a2a_client import A2AClient
 from shared.agent_discovery import AgentDiscoveryService
+from shared.workflow_logger import workflow_logger, WorkflowStepType, WorkflowStepStatus
 
 class ClaimsOrchestratorExecutor(AgentExecutor):
     """
@@ -248,13 +249,31 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
             claim_id = parameters.get('claim_id', f"CLAIM_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
             claim_data = parameters.get('claim_data', {})
             
+            # Start workflow tracking
+            workflow_logger.start_claim_processing(claim_id)
+            
             self.logger.info(f"📋 Processing claim: {claim_id}")
             
             # STEP 1: DISCOVER ALL AVAILABLE AGENTS
             self.logger.info("\n🔍 STEP 1: AGENT DISCOVERY PHASE")
             discovered_agents = await self.agent_discovery.discover_all_agents()
             
+            # Log discovery step
+            agent_details = []
+            for agent_id, agent_info in discovered_agents.items():
+                agent_details.append({
+                    "agent_id": agent_id,
+                    "name": agent_info.get('name', 'Unknown'),
+                    "skills": len(agent_info.get('skills', []))
+                })
+            
+            discovery_step_id = workflow_logger.log_discovery(
+                agents_found=len(discovered_agents),
+                agent_details=agent_details
+            )
+            
             if not discovered_agents:
+                workflow_logger.update_step(discovery_step_id, WorkflowStepStatus.FAILED)
                 self.logger.error("❌ CRITICAL: No agents discovered! Cannot process claim.")
                 return {
                     "status": "failed",
@@ -284,7 +303,23 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
                 task_type="claim_validation"
             )
             
+            # Log agent selection
             if clarifier_agent:
+                selection_step_id = workflow_logger.log_agent_selection(
+                    task_type="intake_clarification",
+                    selected_agent=clarifier_agent['agent_id'],
+                    agent_name=clarifier_agent.get('name', clarifier_agent['agent_id']),
+                    reasoning=f"Best match for claim validation - {clarifier_agent.get('name', 'Selected agent')}"
+                )
+                workflow_logger.update_step(selection_step_id, WorkflowStepStatus.COMPLETED)
+                
+                # Log task dispatch
+                dispatch_step_id = workflow_logger.log_task_dispatch(
+                    agent_name=clarifier_agent.get('name', clarifier_agent['agent_id']),
+                    task_description=f"Process claim {claim_id} for initial validation",
+                    agent_url=clarifier_agent['base_url']
+                )
+                
                 clarifier_task = {
                     "description": f"Process claim {claim_id} for initial validation",
                     "message": json.dumps({
@@ -297,7 +332,16 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
                 clarifier_result = await self.agent_discovery.send_task_to_agent(clarifier_agent, clarifier_task)
                 processing_results['clarification'] = clarifier_result
                 
-                if clarifier_result.get('status') != 'success':
+                # Log agent response
+                success = clarifier_result.get('status') == 'success'
+                response_step_id = workflow_logger.log_agent_response(
+                    agent_name=clarifier_agent.get('name', clarifier_agent['agent_id']),
+                    success=success,
+                    response_summary="Validation completed successfully" if success else "Validation failed",
+                    response_details=clarifier_result
+                )
+                
+                if not success:
                     self.logger.error(f"❌ Intake clarification failed")
                     return {
                         "status": "failed",
@@ -416,6 +460,13 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
             self.logger.info(f"🎉 CLAIM {claim_id} PROCESSING COMPLETED SUCCESSFULLY!")
             self.logger.info(f"🎉 DECISION: {final_decision.get('decision')}")
             self.logger.info("🎉 ===============================================")
+            
+            # Complete workflow tracking
+            workflow_logger.log_completion(
+                claim_id=claim_id,
+                final_status=f"Claim processed with decision: {final_decision.get('decision', 'Unknown')}",
+                processing_time_ms=5000  # Approximate processing time
+            )
             
             return {
                 "status": "completed",

@@ -518,17 +518,17 @@
             </div>
         </section>
 
-        <!-- Activity Log Section -->
+        <!-- Processing Steps Section -->
         <section class="activity-section">
             <div class="section-header">
                 <h2 class="section-title">
-                    <i class="fas fa-clock"></i>
-                    Recent Activity
+                    <i class="fas fa-cogs"></i>
+                    Processing Steps
                 </h2>
             </div>
             
             <div class="activity-log" id="activityLog">
-                <!-- Activity items will be loaded here -->
+                <!-- Processing steps will be loaded here -->
             </div>
         </section>
     </main>
@@ -538,19 +538,19 @@
         document.addEventListener('DOMContentLoaded', function() {
             console.log('🖥️ Insurance Claims Dashboard initializing...');
             loadClaims();
-            loadActivityLogs();
+            loadProcessingSteps();
             
             // Auto-refresh every 7 seconds for real-time updates
             setInterval(() => {
                 refreshClaims();
-                loadActivityLogs();
+                loadProcessingSteps();
             }, 7000);
         });
 
         // API calls
         async function apiCall(endpoint, options = {}) {
             try {
-                const response = await fetch(`/api${endpoint}`, {
+                const response = await fetch(endpoint, {
                     headers: {
                         'Content-Type': 'application/json',
                         ...options.headers
@@ -572,7 +572,7 @@
         // Load claims data
         async function loadClaims() {
             try {
-                const response = await apiCall('/claims');
+                const response = await apiCall('/api/claims');
                 const claims = response.claims || [];
                 
                 displayClaims(claims);
@@ -651,42 +651,71 @@
             document.getElementById('pendingClaims').textContent = pending;
         }
 
-        // Load activity logs
-        async function loadActivityLogs() {
+        // Load processing steps
+        async function loadProcessingSteps() {
             try {
-                const response = await apiCall('/logs');
-                const logs = response.logs || [];
+                const response = await apiCall('/api/processing-steps');
+                const steps = response.steps || [];
                 
-                displayActivityLogs(logs);
+                displayProcessingSteps(steps);
                 
             } catch (error) {
-                console.error('Error loading activity logs:', error);
+                console.error('Error loading processing steps:', error);
                 document.getElementById('activityLog').innerHTML = 
-                    '<p style="text-align: center; color: #666; padding: 1rem;">Failed to load activity logs.</p>';
+                    '<p style="text-align: center; color: #666; padding: 1rem;">Failed to load processing steps.</p>';
             }
         }
 
-        // Display activity logs
-        function displayActivityLogs(logs) {
+        // Display processing steps
+        function displayProcessingSteps(steps) {
             const container = document.getElementById('activityLog');
             
-            if (logs.length === 0) {
-                container.innerHTML = '<p style="text-align: center; color: #666; padding: 1rem;">No recent activity.</p>';
+            if (steps.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666; padding: 1rem;">No processing steps recorded.</p>';
                 return;
             }
             
-            container.innerHTML = logs.map(log => `
+            container.innerHTML = steps.map(step => `
                 <div class="activity-item">
-                    <div class="activity-icon activity-${log.type}">
-                        <i class="fas fa-${getActivityIcon(log.type)}"></i>
+                    <div class="activity-icon activity-${getStepStatusClass(step.status)}">
+                        <i class="fas fa-${getStepIcon(step.step_type)}"></i>
                     </div>
-                    <div class="activity-time">${formatTime(log.timestamp)}</div>
-                    <div class="activity-message">${log.message}</div>
+                    <div class="activity-time">${formatTime(step.timestamp)}</div>
+                    <div class="activity-message">
+                        <strong>${step.title || step.step_type.replace('_', ' ').toUpperCase()}:</strong> ${step.description}
+                        ${step.agent_name ? `<br><small>Agent: ${step.agent_name}</small>` : ''}
+                        ${step.details ? `<br><small>${step.details}</small>` : ''}
+                        ${step.claim_id ? `<br><small>Claim: ${step.claim_id}</small>` : ''}
+                    </div>
                 </div>
             `).join('');
         }
 
-        // Get activity icon based on type
+        // Get step icon based on type
+        function getStepIcon(stepType) {
+            const icons = {
+                'agent_discovery': 'search',
+                'agent_selection': 'user-check',
+                'task_dispatch': 'paper-plane',
+                'agent_response': 'reply',
+                'decision': 'brain',
+                'orchestrator_action': 'cogs'
+            };
+            return icons[stepType] || 'info-circle';
+        }
+
+        // Get step status class
+        function getStepStatusClass(status) {
+            const classes = {
+                'started': 'process',
+                'completed': 'complete',
+                'failed': 'error',
+                'in_progress': 'process'
+            };
+            return classes[status] || 'process';
+        }
+
+        // Get activity icon based on type (legacy support)
         function getActivityIcon(type) {
             const icons = {
                 'claim': 'file-medical',
@@ -717,7 +746,7 @@
                 const employeeId = prompt('Enter your Employee ID:');
                 if (!employeeId) return;
                 
-                const response = await apiCall(`/claims/${claimId}/process`, {
+                const response = await apiCall(`/api/claims/${claimId}/process`, {
                     method: 'POST',
                     body: JSON.stringify({
                         claimId: claimId,
