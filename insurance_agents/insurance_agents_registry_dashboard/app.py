@@ -1,9 +1,9 @@
 """
-Insurance Claims Processing Dashboard
+Unified Insurance Management Dashboard
 
-A professional web dashboard for insurance claim processing employees to manage
-and monitor the multi-agent claims processing workflow. Features real-time status
-updates, claim processing controls, and agent orchestration visibility.
+A comprehensive web dashboard that provides both claims processing and agent registry
+management on a single service. Features seamless navigation between employee claims
+dashboard and admin agent registry dashboard.
 """
 
 import asyncio
@@ -90,9 +90,9 @@ class ProcessingRequest(BaseModel):
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Insurance Claims Processing Dashboard",
-    description="Professional dashboard for insurance claim processing employees",
-    version="1.0.0"
+    title="Unified Insurance Management Dashboard",
+    description="Comprehensive dashboard for claims processing and agent registry management",
+    version="2.0.0"
 )
 
 # CORS middleware
@@ -107,6 +107,7 @@ app.add_middleware(
 # Global state (in production, this would be in a database)
 active_claims: Dict[str, ClaimStatus] = {}
 registered_agents: Dict[str, AgentInfo] = {}
+agent_cards: Dict[str, Dict] = {}  # Store agent cards for detailed info
 processing_logs: List[Dict] = []
 
 terminal_logger = TerminalLogger()
@@ -116,8 +117,11 @@ async def startup_event():
     """Initialize dashboard on startup"""
     terminal_logger.log("DASHBOARD", "STARTUP", "Insurance Claims Processing Dashboard starting...")
     
-    # Initialize demo agents
+    # Initialize real agents with health checking
     await initialize_demo_agents()
+    
+    # Start background task to refresh agent status every 30 seconds
+    asyncio.create_task(refresh_agent_status_periodically())
     
     # Load sample claims
     await load_sample_claims()
@@ -125,50 +129,125 @@ async def startup_event():
     terminal_logger.log("SUCCESS", "DASHBOARD", "Dashboard initialized successfully on http://localhost:3000")
 
 async def initialize_demo_agents():
-    """Initialize demo insurance agents"""
-    demo_agents = [
+    """Initialize and monitor real insurance agents"""
+    # Real agent endpoints (same as your actual agents)
+    real_agents = [
         {
-            "agentId": "claims_assist_001",
-            "name": "ClaimsAssist Orchestrator", 
+            "agentId": "claims_orchestrator",
+            "name": "Claims Orchestrator", 
+            "url": "http://localhost:8001",
             "type": "orchestrator",
-            "status": "online",
-            "capabilities": ["workflow_orchestration", "agent_routing", "decision_aggregation"],
-            "lastActivity": datetime.now().isoformat(),
-            "currentClaims": []
+            "capabilities": ["workflow_orchestration", "agent_routing", "decision_aggregation"]
         },
         {
-            "agentId": "intake_clarifier_001",
-            "name": "Claims Intake Clarifier",
-            "type": "specialist", 
-            "status": "online",
-            "capabilities": ["intake_validation", "completeness_check", "gap_analysis"],
-            "lastActivity": datetime.now().isoformat(),
-            "currentClaims": []
+            "agentId": "intake_clarifier",
+            "name": "Intake Clarifier",
+            "url": "http://localhost:8002", 
+            "type": "specialist",
+            "capabilities": ["intake_validation", "completeness_check", "gap_analysis"]
         },
         {
-            "agentId": "doc_intelligence_001", 
+            "agentId": "document_intelligence", 
             "name": "Document Intelligence",
+            "url": "http://localhost:8003",
             "type": "specialist",
-            "status": "online", 
-            "capabilities": ["document_processing", "text_extraction", "evidence_tagging"],
-            "lastActivity": datetime.now().isoformat(),
-            "currentClaims": []
+            "capabilities": ["document_processing", "text_extraction", "evidence_tagging"]
         },
         {
-            "agentId": "coverage_rules_001",
+            "agentId": "coverage_rules_engine",
             "name": "Coverage Rules Engine", 
+            "url": "http://localhost:8004",
             "type": "specialist",
-            "status": "online",
-            "capabilities": ["policy_evaluation", "rules_matching", "decision_recommendation"],
-            "lastActivity": datetime.now().isoformat(),
-            "currentClaims": []
+            "capabilities": ["coverage_evaluation", "policy_analysis", "decision_engine"]
         }
     ]
     
-    for agent_data in demo_agents:
-        agent = AgentInfo(**agent_data)
-        registered_agents[agent.agentId] = agent
-        terminal_logger.log("AGENT", "REGISTER", f"Registered agent: {agent.name}")
+    # Check real agent status and register them
+    for agent_config in real_agents:
+        status = await check_real_agent_health(agent_config["url"], agent_config["agentId"])
+        
+        registered_agents[agent_config["agentId"]] = AgentInfo(
+            agentId=agent_config["agentId"],
+            name=agent_config["name"],
+            type=agent_config["type"],
+            status=status,
+            capabilities=agent_config["capabilities"],
+            lastActivity=datetime.now().isoformat(),
+            currentClaims=[]
+        )
+        
+        terminal_logger.log("AGENT", "REGISTRATION", 
+            f"Agent {agent_config['name']} registered with status: {status}")
+
+async def check_real_agent_health(agent_url: str, agent_id: str = None) -> str:
+    """Check if a real agent is online and fetch its agent card"""
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
+            # Try multiple endpoints to determine if agent is alive
+            endpoints_to_try = [
+                f"{agent_url}/.well-known/agent.json",  # A2A standard
+                f"{agent_url}/health",                   # Health check
+                f"{agent_url}/",                         # Root endpoint
+                f"{agent_url}/docs"                      # FastAPI docs
+            ]
+            
+            for endpoint in endpoints_to_try:
+                try:
+                    async with session.get(endpoint) as response:
+                        if response.status == 200:
+                            # If it's the agent card endpoint, store the card
+                            if endpoint.endswith("agent.json") and agent_id:
+                                try:
+                                    agent_card = await response.json()
+                                    agent_cards[agent_id] = agent_card
+                                    terminal_logger.log("SUCCESS", "AGENT_CARD", 
+                                        f"Fetched agent card for {agent_card.get('name', agent_id)}")
+                                except:
+                                    pass  # If JSON parsing fails, continue
+                            return "online"
+                except:
+                    continue  # Try next endpoint
+                    
+            return "offline"
+            
+    except Exception as e:
+        terminal_logger.log("WARNING", "AGENT_CHECK", f"Health check failed for {agent_url}: {e}")
+        return "offline"
+
+async def refresh_agent_status_periodically():
+    """Periodically refresh agent status every 7 seconds"""
+    while True:
+        try:
+            await asyncio.sleep(7)  # Wait 7 seconds for faster updates
+            terminal_logger.log("DASHBOARD", "REFRESH", "Refreshing agent status...")
+            
+            # Update status for all registered agents
+            for agent_id, agent_info in registered_agents.items():
+                # For our real agents, construct URL from agent_id
+                port_map = {
+                    "claims_orchestrator": 8001,
+                    "intake_clarifier": 8002, 
+                    "document_intelligence": 8003,
+                    "coverage_rules_engine": 8004
+                }
+                
+                if agent_id in port_map:
+                    agent_url = f"http://localhost:{port_map[agent_id]}"
+                    new_status = await check_real_agent_health(agent_url, agent_id)
+                    
+                    if agent_info.status != new_status:
+                        terminal_logger.log("AGENT", "STATUS_CHANGE", 
+                            f"Agent {agent_info.name}: {agent_info.status} -> {new_status}")
+                        agent_info.status = new_status
+                        agent_info.lastActivity = datetime.now().isoformat()
+                    else:
+                        # Log the status check even if no change
+                        terminal_logger.log("DASHBOARD", "STATUS_CHECK", 
+                            f"Agent {agent_info.name}: {new_status}")
+                        
+        except Exception as e:
+            terminal_logger.log("ERROR", "REFRESH", f"Error refreshing agent status: {e}")
+            await asyncio.sleep(10)  # Wait 10 seconds on error
 
 async def load_sample_claims():
     """Load sample claims for demonstration"""
@@ -209,14 +288,34 @@ async def load_sample_claims():
 
 # API Endpoints
 
+# API Endpoints
+
 @app.get("/", response_class=HTMLResponse)
-async def serve_dashboard():
-    """Serve the main dashboard HTML"""
-    html_file = Path(__file__).parent / "static" / "insurance_dashboard.html"
+async def serve_default_dashboard():
+    """Serve the default claims dashboard (employee view)"""
+    html_file = Path(__file__).parent / "static" / "claims_dashboard.html"
     if html_file.exists():
         return HTMLResponse(content=html_file.read_text(encoding='utf-8'), status_code=200)
     else:
-        return HTMLResponse(content="<h1>Insurance Dashboard - HTML file not found</h1>", status_code=404)
+        return HTMLResponse(content="<h1>Claims Dashboard - HTML file not found</h1>", status_code=404)
+
+@app.get("/claims", response_class=HTMLResponse)
+async def serve_claims_dashboard():
+    """Serve the claims processing dashboard (employee view)"""
+    html_file = Path(__file__).parent / "static" / "claims_dashboard.html"
+    if html_file.exists():
+        return HTMLResponse(content=html_file.read_text(encoding='utf-8'), status_code=200)
+    else:
+        return HTMLResponse(content="<h1>Claims Dashboard - HTML file not found</h1>", status_code=404)
+
+@app.get("/agents", response_class=HTMLResponse)
+async def serve_agent_registry():
+    """Serve the agent registry dashboard (admin view)"""
+    html_file = Path(__file__).parent / "static" / "agent_registry.html"
+    if html_file.exists():
+        return HTMLResponse(content=html_file.read_text(encoding='utf-8'), status_code=200)
+    else:
+        return HTMLResponse(content="<h1>Agent Registry - HTML file not found</h1>", status_code=404)
 
 @app.get("/api/health")
 async def health_check():
@@ -244,6 +343,16 @@ async def get_agents():
     """Get all registered agents"""
     terminal_logger.log("INFO", "API", f"Retrieved {len(registered_agents)} agents")
     return {"agents": list(registered_agents.values())}
+
+@app.get("/api/agent-card/{agent_id}")
+async def get_agent_card(agent_id: str):
+    """Get detailed agent card information"""
+    if agent_id in agent_cards:
+        terminal_logger.log("INFO", "API", f"Retrieved agent card for {agent_id}")
+        return {"success": True, "agentCard": agent_cards[agent_id]}
+    else:
+        terminal_logger.log("WARNING", "API", f"Agent card not found for {agent_id}")
+        return {"success": False, "error": "Agent card not found"}
 
 @app.post("/api/claims/{claim_id}/process")
 async def process_claim(claim_id: str, request: ProcessingRequest, background_tasks: BackgroundTasks):

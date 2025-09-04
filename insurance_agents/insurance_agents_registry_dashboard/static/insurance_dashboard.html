@@ -283,11 +283,13 @@
             padding: 1rem;
             border: 1px solid #e9ecef;
             transition: all 0.3s ease;
+            cursor: pointer;
         }
 
         .agent-item:hover {
             background: #e3f2fd;
             border-color: #2a5298;
+            transform: translateY(-2px);
         }
 
         .agent-header {
@@ -515,11 +517,12 @@
             loadAgents();
             loadActivityLogs();
             
-            // Auto-refresh every 30 seconds
+            // Auto-refresh every 7 seconds for real-time updates
             setInterval(() => {
                 refreshClaims();
+                loadAgents();  // Added to refresh agent status too
                 loadActivityLogs();
-            }, 30000);
+            }, 7000);
         });
 
         // API calls
@@ -634,7 +637,7 @@
             const agentsList = document.getElementById('agents-list');
             
             agentsList.innerHTML = agents.map(agent => `
-                <div class="agent-item">
+                <div class="agent-item" onclick="showAgentDetails('${agent.agentId}')">
                     <div class="agent-header">
                         <div class="agent-name">${agent.name}</div>
                         <div class="agent-status ${agent.status}"></div>
@@ -727,6 +730,24 @@
 
         function formatDateTime(dateString) {
             return new Date(dateString).toLocaleString();
+        }
+
+        // Show agent details when clicked
+        async function showAgentDetails(agentId) {
+            try {
+                const response = await fetch(`/api/agent-card/${agentId}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const agentCard = data.agentCard;
+                    alert(`Agent Details:\n\nName: ${agentCard.name}\nVersion: ${agentCard.version}\nDescription: ${agentCard.description}\nCapabilities: ${agentCard.capabilities.join(', ')}`);
+                } else {
+                    alert('Agent details not available at this time.');
+                }
+            } catch (error) {
+                console.error('Error fetching agent details:', error);
+                alert('Error fetching agent details.');
+            }
         }
 
         // Error handling
