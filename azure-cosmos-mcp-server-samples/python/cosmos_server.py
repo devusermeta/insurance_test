@@ -572,6 +572,101 @@ def list_distinct_values(field_name: str, container_name: Optional[str] = None) 
         return f"Error fetching distinct values: {str(e)}"
 
 
+@mcp.tool()
+def put_item(containerName: str, item: dict) -> str:
+    """
+    Insert or update (upsert) an item in a Cosmos DB container.
+    
+    This tool allows writing data to Cosmos DB containers for testing scenarios.
+    
+    Args:
+        containerName: Name of the container to write to
+        item: Dictionary representing the item to insert/update
+        
+    Returns:
+        Success message or error details
+    """
+    try:
+        container = cosmos_connection.get_container_client(containerName)
+        
+        # Ensure the item has an id field
+        if 'id' not in item:
+            return "Error: Item must have an 'id' field"
+        
+        # Upsert the item
+        response = container.upsert_item(item)
+        
+        return f"Successfully upserted item with id '{item['id']}' in container '{containerName}'"
+        
+    except exceptions.CosmosHttpResponseError as e:
+        return f"Cosmos DB error: {e.status_code} - {e.message}"
+    except Exception as e:
+        return f"Error upserting item: {str(e)}"
+
+
+@mcp.tool()
+def delete_item(containerName: str, item_id: str, partition_key: Optional[str] = None) -> str:
+    """
+    Delete an item from a Cosmos DB container.
+    
+    Args:
+        containerName: Name of the container
+        item_id: ID of the item to delete
+        partition_key: Partition key value (if not provided, assumes id is the partition key)
+        
+    Returns:
+        Success message or error details
+    """
+    try:
+        container = cosmos_connection.get_container_client(containerName)
+        
+        # Use item_id as partition key if not specified
+        pk_value = partition_key if partition_key is not None else item_id
+        
+        # Delete the item
+        container.delete_item(item=item_id, partition_key=pk_value)
+        
+        return f"Successfully deleted item with id '{item_id}' from container '{containerName}'"
+        
+    except exceptions.CosmosHttpResponseError as e:
+        if e.status_code == 404:
+            return f"Item with id '{item_id}' not found in container '{containerName}'"
+        return f"Cosmos DB error: {e.status_code} - {e.message}"
+    except Exception as e:
+        return f"Error deleting item: {str(e)}"
+
+
+@mcp.tool()
+def create_container(containerName: str, partition_key_path: str = "/id") -> str:
+    """
+    Create a new container in the current database.
+    
+    Args:
+        containerName: Name for the new container
+        partition_key_path: Partition key path (default: "/id")
+        
+    Returns:
+        Success message or error details
+    """
+    try:
+        db_client = cosmos_connection.get_database_client()
+        
+        # Create container
+        container = db_client.create_container(
+            id=containerName,
+            partition_key={"paths": [partition_key_path], "kind": "Hash"}
+        )
+        
+        return f"Successfully created container '{containerName}' with partition key '{partition_key_path}'"
+        
+    except exceptions.CosmosResourceExistsError:
+        return f"Container '{containerName}' already exists"
+    except exceptions.CosmosHttpResponseError as e:
+        return f"Cosmos DB error: {e.status_code} - {e.message}"
+    except Exception as e:
+        return f"Error creating container: {str(e)}"
+
+
 def validate_connection_params(args: argparse.Namespace) -> bool:
     """
     Validate that all required connection parameters are provided.

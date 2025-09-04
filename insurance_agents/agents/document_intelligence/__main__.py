@@ -3,6 +3,10 @@ Document Intelligence Agent - A2A Protocol Implementation
 Specialized agent for document analysis and intelligence extraction
 """
 
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
 import asyncio
 import logging
 import click
@@ -16,7 +20,7 @@ from a2a.server.tasks import InMemoryTaskStore, InMemoryPushNotificationConfigSt
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from dotenv import load_dotenv
 
-from .document_intelligence_executor import DocumentIntelligenceExecutor
+from agents.document_intelligence.document_intelligence_executor import DocumentIntelligenceExecutor
 from shared.mcp_config import A2A_AGENT_PORTS
 
 # Configure logging

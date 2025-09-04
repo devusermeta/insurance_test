@@ -20,7 +20,7 @@ from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from dotenv import load_dotenv
 
 from shared.mcp_config import A2A_AGENT_PORTS
-from agents.intake_clarifier.intake_clarifier_executor import IntakeClarifierExecutor
+from agents.intake_clarifier.a2a_wrapper import A2AIntakeClarifierExecutor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ def main(host, port):
     httpx_client = httpx.AsyncClient()
     push_config_store = InMemoryPushNotificationConfigStore()
     request_handler = DefaultRequestHandler(
-        agent_executor=IntakeClarifierExecutor(),
+        agent_executor=A2AIntakeClarifierExecutor(),
         task_store=InMemoryTaskStore(),
         push_config_store=push_config_store,
         push_sender=BasePushNotificationSender(httpx_client, push_config_store),
