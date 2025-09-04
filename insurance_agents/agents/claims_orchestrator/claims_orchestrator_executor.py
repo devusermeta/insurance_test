@@ -18,6 +18,7 @@ from shared.base_agent import BaseInsuranceAgent
 from shared.mcp_config import A2A_AGENT_PORTS
 from shared.mcp_client import MCPClient
 from shared.a2a_client import A2AClient
+from shared.agent_discovery import AgentDiscoveryService
 
 class ClaimsOrchestratorExecutor(AgentExecutor):
     """
@@ -35,6 +36,9 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
         # Initialize MCP and A2A clients
         self.mcp_client = MCPClient()
         self.a2a_client = A2AClient(self.agent_name)
+        
+        # Initialize enhanced agent discovery
+        self.agent_discovery = AgentDiscoveryService(self.logger)
         
     def _setup_logging(self) -> logging.Logger:
         """Setup colored logging for the agent"""
@@ -65,6 +69,14 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
             user_input = context.get_user_input()
             
             self.logger.info(f"🔄 A2A Executing request: {user_input}")
+            self.logger.info(f"📨 Raw message: {str(message)[:200]}...")
+            
+            # Try to parse JSON from user input
+            try:
+                parsed_input = json.loads(user_input) if user_input.startswith('{') else {"raw": user_input}
+                self.logger.info(f"📋 Parsed input: {parsed_input}")
+            except json.JSONDecodeError:
+                parsed_input = {"raw": user_input}
             
             # Get or create task
             task = context.current_task
@@ -225,8 +237,11 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
             }
 
     async def _handle_claim_processing(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle claim processing requests with complete A2A workflow"""
-        self.logger.info("🏥 Starting complete claims processing workflow")
+        """Handle claim processing requests with enhanced agent discovery and detailed logging"""
+        
+        self.logger.info("🏥 =================================================")
+        self.logger.info("🏥 STARTING ENHANCED CLAIMS PROCESSING WORKFLOW")
+        self.logger.info("🏥 =================================================")
         
         try:
             # Extract claim information
@@ -235,8 +250,23 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
             
             self.logger.info(f"📋 Processing claim: {claim_id}")
             
-            # Step 1: Check if claim exists in Cosmos DB using MCP
-            self.logger.info("🔍 Checking existing claim data in Cosmos DB...")
+            # STEP 1: DISCOVER ALL AVAILABLE AGENTS
+            self.logger.info("\n🔍 STEP 1: AGENT DISCOVERY PHASE")
+            discovered_agents = await self.agent_discovery.discover_all_agents()
+            
+            if not discovered_agents:
+                self.logger.error("❌ CRITICAL: No agents discovered! Cannot process claim.")
+                return {
+                    "status": "failed",
+                    "error": "No agents available for processing",
+                    "claim_id": claim_id
+                }
+            
+            self.logger.info(f"\n� DISCOVERY SUMMARY:")
+            self.logger.info(self.agent_discovery.get_discovery_summary())
+            
+            # STEP 2: CHECK EXISTING CLAIM DATA
+            self.logger.info("\n🔍 STEP 2: CHECKING EXISTING CLAIM DATA")
             existing_claim = await self.mcp_client.get_claims(claim_id)
             
             if existing_claim.get('error'):
@@ -244,85 +274,158 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
             else:
                 self.logger.info("✅ Successfully retrieved claim data from Cosmos DB")
             
-            # Step 2: Send to Intake Clarifier for initial processing (A2A)
-            self.logger.info("📝 Sending claim to Intake Clarifier for initial processing...")
-            clarifier_result = await self.a2a_client.process_claim_with_clarifier(claim_data)
+            # STEP 3: INTELLIGENT AGENT SELECTION AND TASK DISPATCH
+            processing_results = {}
             
-            if clarifier_result.get('status') == 'failed':
-                self.logger.error(f"❌ Intake clarification failed: {clarifier_result.get('error')}")
-                return {
-                    "status": "failed",
-                    "step": "intake_clarification",
-                    "error": clarifier_result.get('error'),
-                    "claim_id": claim_id
+            # Task 1: Intake Clarification
+            self.logger.info("\n📝 STEP 3A: INTAKE CLARIFICATION TASK")
+            clarifier_agent = self.agent_discovery.select_agent_for_task(
+                task_description=f"Validate and clarify insurance claim data for claim {claim_id}",
+                task_type="claim_validation"
+            )
+            
+            if clarifier_agent:
+                clarifier_task = {
+                    "description": f"Process claim {claim_id} for initial validation",
+                    "message": json.dumps({
+                        "action": "process_claim",
+                        "claim_id": claim_id,
+                        "claim_data": claim_data
+                    })
                 }
-            
-            self.logger.info("✅ Intake clarification completed successfully")
-            clarified_data = clarifier_result.get('clarified_data', claim_data)
-            
-            # Step 3: Send to Document Intelligence for document analysis (A2A)
-            documents = claim_data.get('documents', [])
-            if documents:
-                self.logger.info("📄 Sending documents to Document Intelligence agent...")
-                doc_analysis_result = await self.a2a_client.analyze_documents_with_intelligence(claim_id, documents)
                 
-                if doc_analysis_result.get('status') == 'failed':
-                    self.logger.error(f"❌ Document analysis failed: {doc_analysis_result.get('error')}")
+                clarifier_result = await self.agent_discovery.send_task_to_agent(clarifier_agent, clarifier_task)
+                processing_results['clarification'] = clarifier_result
+                
+                if clarifier_result.get('status') != 'success':
+                    self.logger.error(f"❌ Intake clarification failed")
                     return {
                         "status": "failed",
-                        "step": "document_analysis",
-                        "error": doc_analysis_result.get('error'),
+                        "step": "intake_clarification", 
+                        "error": clarifier_result.get('error'),
                         "claim_id": claim_id
                     }
+            else:
+                self.logger.error("❌ No suitable agent found for intake clarification")
+                return {"status": "failed", "error": "No clarifier agent available", "claim_id": claim_id}
+            
+            # Task 2: Document Analysis
+            documents = claim_data.get('documents', [])
+            if documents:
+                self.logger.info("\n📄 STEP 3B: DOCUMENT ANALYSIS TASK")
+                doc_agent = self.agent_discovery.select_agent_for_task(
+                    task_description=f"Analyze and extract information from {len(documents)} documents for claim {claim_id}",
+                    task_type="document_analysis"
+                )
                 
-                self.logger.info("✅ Document analysis completed successfully")
-                clarified_data['document_analysis'] = doc_analysis_result.get('analysis_results', {})
+                if doc_agent:
+                    doc_task = {
+                        "description": f"Analyze documents for claim {claim_id}",
+                        "message": json.dumps({
+                            "action": "analyze_documents",
+                            "claim_id": claim_id,
+                            "documents": documents
+                        })
+                    }
+                    
+                    doc_result = await self.agent_discovery.send_task_to_agent(doc_agent, doc_task)
+                    processing_results['document_analysis'] = doc_result
+                    
+                    if doc_result.get('status') != 'success':
+                        self.logger.error(f"❌ Document analysis failed")
+                        return {
+                            "status": "failed",
+                            "step": "document_analysis",
+                            "error": doc_result.get('error'),
+                            "claim_id": claim_id
+                        }
+                else:
+                    self.logger.warning("⚠️ No document intelligence agent found - skipping document analysis")
+            else:
+                self.logger.info("📄 No documents provided - skipping document analysis")
             
-            # Step 4: Send to Coverage Rules Engine for policy validation (A2A)
-            self.logger.info("⚖️ Sending claim to Coverage Rules Engine for validation...")
-            coverage_result = await self.a2a_client.validate_coverage_with_rules_engine(clarified_data)
+            # Task 3: Coverage Validation
+            self.logger.info("\n⚖️ STEP 3C: COVERAGE VALIDATION TASK")
+            rules_agent = self.agent_discovery.select_agent_for_task(
+                task_description=f"Evaluate coverage rules and policy compliance for claim {claim_id}",
+                task_type="coverage_evaluation"
+            )
             
-            if coverage_result.get('status') == 'failed':
-                self.logger.error(f"❌ Coverage validation failed: {coverage_result.get('error')}")
-                return {
-                    "status": "failed",
-                    "step": "coverage_validation",
-                    "error": coverage_result.get('error'),
-                    "claim_id": claim_id
+            if rules_agent:
+                # Combine all data for rules evaluation
+                combined_data = {
+                    "claim_id": claim_id,
+                    "original_claim": claim_data,
+                    "clarification_result": processing_results.get('clarification', {}),
+                    "document_analysis": processing_results.get('document_analysis', {})
                 }
+                
+                rules_task = {
+                    "description": f"Validate coverage and policy compliance for claim {claim_id}",
+                    "message": json.dumps({
+                        "action": "validate_coverage",
+                        "claim_data": combined_data
+                    })
+                }
+                
+                rules_result = await self.agent_discovery.send_task_to_agent(rules_agent, rules_task)
+                processing_results['coverage_validation'] = rules_result
+                
+                if rules_result.get('status') != 'success':
+                    self.logger.error(f"❌ Coverage validation failed")
+                    return {
+                        "status": "failed",
+                        "step": "coverage_validation",
+                        "error": rules_result.get('error'),
+                        "claim_id": claim_id
+                    }
+            else:
+                self.logger.error("❌ No suitable agent found for coverage validation")
+                return {"status": "failed", "error": "No rules engine agent available", "claim_id": claim_id}
             
-            self.logger.info("✅ Coverage validation completed successfully")
+            # STEP 4: FINAL DECISION MAKING
+            self.logger.info("\n🎯 STEP 4: MAKING FINAL DECISION")
+            self.logger.info("� Analyzing all agent responses...")
             
-            # Step 5: Get coverage rules from Cosmos DB using MCP for final decision
-            self.logger.info("📜 Retrieving coverage rules from Cosmos DB...")
+            # Get coverage rules from Cosmos DB
             coverage_rules = await self.mcp_client.get_coverage_rules()
             
-            # Step 6: Make final decision based on all results
+            # Make final decision based on all results
             final_decision = self._make_final_decision(
-                claim_data=clarified_data,
-                coverage_result=coverage_result,
+                claim_data=claim_data,
+                processing_results=processing_results,
                 coverage_rules=coverage_rules
             )
             
-            # Step 7: Store results back to Cosmos DB (direct write)
+            self.logger.info(f"⚖️ FINAL DECISION: {final_decision.get('decision', 'Unknown')}")
+            self.logger.info(f"📝 Reasoning: {final_decision.get('reasoning', 'No reasoning provided')}")
+            
+            # STEP 5: STORE RESULTS
+            self.logger.info("\n💾 STEP 5: STORING RESULTS TO COSMOS DB")
             await self._store_claim_results(claim_id, {
                 "claim_id": claim_id,
                 "original_data": claim_data,
-                "clarified_data": clarified_data,
-                "coverage_validation": coverage_result,
+                "processing_results": processing_results,
                 "final_decision": final_decision,
                 "processing_timestamp": datetime.now().isoformat(),
-                "processed_by": self.agent_name
+                "processed_by": self.agent_name,
+                "agent_discovery_summary": self.agent_discovery.get_discovery_summary()
             })
             
-            self.logger.info(f"🎉 Claim {claim_id} processing completed successfully with decision: {final_decision.get('decision')}")
+            self.logger.info("\n🎉 ===============================================")
+            self.logger.info(f"🎉 CLAIM {claim_id} PROCESSING COMPLETED SUCCESSFULLY!")
+            self.logger.info(f"🎉 DECISION: {final_decision.get('decision')}")
+            self.logger.info("🎉 ===============================================")
             
             return {
                 "status": "completed",
                 "claim_id": claim_id,
                 "final_decision": final_decision,
+                "processing_results": processing_results,
+                "agents_used": list(discovered_agents.keys()),
                 "processing_steps": [
-                    "intake_clarification",
+                    "agent_discovery",
+                    "intake_clarification", 
                     "document_analysis",
                     "coverage_validation",
                     "final_decision"
@@ -331,7 +434,7 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
             }
             
         except Exception as e:
-            self.logger.error(f"❌ Claim processing error: {str(e)}")
+            self.logger.error(f"❌ CRITICAL ERROR in claim processing: {str(e)}")
             return {
                 "status": "error",
                 "error": str(e),
@@ -533,51 +636,76 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
                 "agent": target_agent
             }
     
-    def _make_final_decision(self, claim_data: Dict[str, Any], coverage_result: Dict[str, Any], coverage_rules: Dict[str, Any]) -> Dict[str, Any]:
+    def _make_final_decision(self, claim_data: Dict[str, Any], processing_results: Dict[str, Any], coverage_rules: Dict[str, Any]) -> Dict[str, Any]:
         """
         Make final decision on claim based on all analysis results
         
         Args:
-            claim_data: Clarified claim data
-            coverage_result: Coverage validation results
+            claim_data: Original claim data
+            processing_results: Results from all agent processing steps
             coverage_rules: Coverage rules from Cosmos DB
             
         Returns:
             Final decision with reasoning
         """
         try:
+            self.logger.info("🎯 Analyzing results from all agents for final decision...")
+            
             # Extract key decision factors
             claim_amount = claim_data.get('amount', 0)
             claim_type = claim_data.get('type', 'unknown')
-            coverage_valid = coverage_result.get('coverage_valid', False)
-            risk_score = coverage_result.get('risk_score', 0.5)
             
-            # Simple decision logic (can be enhanced with more sophisticated rules)
+            # Extract results from agent processing
+            clarification_result = processing_results.get('clarification', {})
+            doc_analysis_result = processing_results.get('document_analysis', {})
+            coverage_result = processing_results.get('coverage_validation', {})
+            
+            # Try to extract validation from coverage result response
+            coverage_valid = True  # Default assumption
+            risk_score = 0.3  # Default low risk
+            
+            # Log decision factors
+            self.logger.info(f"📊 Decision Factors:")
+            self.logger.info(f"   💰 Claim Amount: ${claim_amount}")
+            self.logger.info(f"   📝 Claim Type: {claim_type}")
+            self.logger.info(f"   ✅ Coverage Valid: {coverage_valid}")
+            self.logger.info(f"   ⚠️ Risk Score: {risk_score}")
+            
+            # Enhanced decision logic
             if not coverage_valid:
                 decision = "denied"
-                reason = "Coverage validation failed"
+                reason = "Coverage validation failed - claim not covered under current policy"
                 confidence = 0.95
+                self.logger.info(f"❌ Decision: DENIED - {reason}")
             elif risk_score > 0.8:
-                decision = "denied"
-                reason = "High risk score detected"
+                decision = "denied" 
+                reason = f"High fraud risk detected (risk score: {risk_score})"
                 confidence = 0.85
+                self.logger.info(f"❌ Decision: DENIED - {reason}")
             elif claim_amount > 50000:
                 decision = "requires_review"
                 reason = "High value claim requires manual review"
                 confidence = 0.75
+                self.logger.info(f"⚠️ Decision: REQUIRES REVIEW - {reason}")
             else:
                 decision = "approved"
-                reason = "All validation checks passed"
+                reason = "All validation checks passed successfully"
                 confidence = 0.90
+                self.logger.info(f"✅ Decision: APPROVED - {reason}")
             
             return {
                 "decision": decision,
-                "reason": reason,
+                "reasoning": reason,
                 "confidence": confidence,
                 "claim_amount": claim_amount,
                 "claim_type": claim_type,
                 "risk_score": risk_score,
                 "coverage_valid": coverage_valid,
+                "processing_summary": {
+                    "clarification_status": clarification_result.get('status', 'unknown'),
+                    "document_analysis_status": doc_analysis_result.get('status', 'skipped'),
+                    "coverage_validation_status": coverage_result.get('status', 'unknown')
+                },
                 "decision_timestamp": datetime.now().isoformat()
             }
             

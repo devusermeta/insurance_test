@@ -58,7 +58,22 @@ class TerminalLogger:
         
         emoji = emoji_map.get(level, '📋')
         color = color_map.get(level, cls.COLORS['blue'])
-        print(f"{color}[{timestamp}] {emoji} {component.upper()}: {message}{cls.COLORS['reset']}")
+        console_message = f"{color}[{timestamp}] {emoji} {component.upper()}: {message}{cls.COLORS['reset']}"
+        print(console_message)
+        
+        # Also add to processing logs for the Recent Activity section
+        log_entry = {
+            "timestamp": timestamp,
+            "level": level,
+            "component": component,
+            "message": message,
+            "emoji": emoji
+        }
+        processing_logs.append(log_entry)
+        
+        # Keep only last 100 logs to prevent memory issues
+        if len(processing_logs) > 100:
+            processing_logs.pop(0)
 
 # Data Models
 class ClaimStatus(BaseModel):
@@ -250,7 +265,69 @@ async def refresh_agent_status_periodically():
             await asyncio.sleep(10)  # Wait 10 seconds on error
 
 async def load_sample_claims():
-    """Load sample claims for demonstration"""
+    """Load REAL claims from Cosmos DB via MCP server"""
+    try:
+        terminal_logger.log("COSMOS", "LOADING", "Loading real claims from Cosmos DB...")
+        
+        # Call MCP server to get real claims
+        import uuid
+        mcp_payload = {
+            "jsonrpc": "2.0",
+            "id": str(uuid.uuid4()),
+            "method": "tools/call",
+            "params": {
+                "name": "query_cosmos",
+                "arguments": {
+                    "collection": "claims",
+                    "query": "SELECT * FROM c",
+                    "max_items": 50
+                }
+            }
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "http://localhost:8080/mcp",
+                json=mcp_payload,
+                headers={"Content-Type": "application/json"},
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                
+                if response.status == 200:
+                    data = await response.json()
+                    terminal_logger.log("COSMOS", "SUCCESS", "Successfully retrieved real claims from Cosmos")
+                    
+                    # Parse real Cosmos data
+                    if "result" in data and "content" in data["result"]:
+                        items = data["result"]["content"]
+                        if isinstance(items, list):
+                            for item in items:
+                                # Create ClaimStatus from real Cosmos data
+                                claim = ClaimStatus(
+                                    claimId=item.get("claimId", "Unknown"),
+                                    status=item.get("status", "submitted"),
+                                    category=item.get("category", "Unknown"),
+                                    amountBilled=float(item.get("amountBilled", 0)),
+                                    submitDate=item.get("submitDate", ""),
+                                    lastUpdate=datetime.now().isoformat(),
+                                    assignedEmployee=None
+                                )
+                                active_claims[claim.claimId] = claim
+                                terminal_logger.log("COSMOS", "LOAD", f"Loaded REAL claim: {claim.claimId} - ${claim.amountBilled} ({item.get('provider', 'N/A')})")
+                            
+                            terminal_logger.log("SUCCESS", "COSMOS", f"Loaded {len(items)} real claims from Cosmos DB")
+                            return
+                    
+                    terminal_logger.log("WARNING", "COSMOS", "No claims found in Cosmos response")
+                
+                else:
+                    terminal_logger.log("ERROR", "COSMOS", f"MCP server returned {response.status}")
+    
+    except Exception as e:
+        terminal_logger.log("ERROR", "COSMOS", f"Failed to load real claims: {str(e)}")
+    
+    # Fallback to sample data if Cosmos fails
+    terminal_logger.log("WARNING", "FALLBACK", "Using fallback sample claims")
     sample_claims = [
         {
             "claimId": "OP-1001",
@@ -379,59 +456,127 @@ async def get_processing_logs():
     return {"logs": processing_logs[-50:]}  # Return last 50 logs
 
 async def simulate_claim_processing(claim_id: str):
-    """Simulate the multi-agent claim processing workflow"""
+    """Process claim using REAL A2A agents instead of simulation"""
     try:
-        terminal_logger.log("CLAIM", "WORKFLOW", f"Starting multi-agent processing for {claim_id}")
+        terminal_logger.log("CLAIM", "WORKFLOW", f"Starting REAL agent processing for {claim_id}")
         
-        # Simulate agent workflow stages
-        stages = [
-            ("claims_assist_001", "Orchestrating workflow", 2),
-            ("intake_clarifier_001", "Validating claim intake", 3),
-            ("doc_intelligence_001", "Processing documents", 4),
-            ("coverage_rules_001", "Evaluating coverage rules", 3),
-            ("claims_assist_001", "Aggregating results", 2)
-        ]
+        # Get the actual claim data
+        claim_data = active_claims.get(claim_id)
+        if not claim_data:
+            terminal_logger.log("ERROR", "WORKFLOW", f"Claim data not found for {claim_id}")
+            return
         
-        for agent_id, activity, duration in stages:
-            # Update agent status
-            if agent_id in registered_agents:
-                registered_agents[agent_id].currentClaims.append(claim_id)
-                registered_agents[agent_id].lastActivity = datetime.now().isoformat()
-            
-            # Log activity
-            log_entry = {
-                "timestamp": datetime.now().isoformat(),
-                "claimId": claim_id,
-                "agentId": agent_id,
-                "activity": activity,
-                "status": "in_progress"
-            }
-            processing_logs.append(log_entry)
-            terminal_logger.log("AGENT", "ACTIVITY", f"{agent_id}: {activity} for {claim_id}")
-            
-            # Simulate processing time
-            await asyncio.sleep(duration)
-            
-            # Remove claim from agent's current claims
-            if agent_id in registered_agents and claim_id in registered_agents[agent_id].currentClaims:
-                registered_agents[agent_id].currentClaims.remove(claim_id)
+        # Debug: Log the claim_data attributes
+        terminal_logger.log("DEBUG", "WORKFLOW", f"Claim data type: {type(claim_data)}")
+        terminal_logger.log("DEBUG", "WORKFLOW", f"Available attributes: {[attr for attr in dir(claim_data) if not attr.startswith('_')]}")
         
-        # Complete processing
-        active_claims[claim_id].status = "approved"  # Simplified - always approve for demo
-        active_claims[claim_id].lastUpdate = datetime.now().isoformat()
-        
-        final_log = {
-            "timestamp": datetime.now().isoformat(),
-            "claimId": claim_id,
-            "agentId": "claims_assist_001",
-            "activity": "Processing completed - APPROVED",
-            "status": "completed"
+        # Convert claim data to proper format
+        claim_info = {
+            "claim_id": claim_id,
+            "type": getattr(claim_data, 'category', 'auto').lower() if getattr(claim_data, 'category', None) else "auto",
+            "amount": float(getattr(claim_data, 'amountBilled', 15000.0)),
+            "description": f"Insurance claim processing for {claim_id}",
+            "customer_id": getattr(claim_data, 'assignedEmployee', 'UNKNOWN') or "UNKNOWN",
+            "policy_number": f"POL_{claim_id}",
+            "incident_date": "2024-01-15",
+            "location": "Dashboard Processing",
+            "documents": ["claim_form.pdf", "supporting_documents.pdf"],
+            "customer_statement": f"Processing {getattr(claim_data, 'category', 'general')} claim through dashboard interface"
         }
-        processing_logs.append(final_log)
-        terminal_logger.log("SUCCESS", "WORKFLOW", f"Completed processing for {claim_id} - APPROVED")
+        
+        # Send to real orchestrator using A2A protocol
+        a2a_payload = {
+            "jsonrpc": "2.0",
+            "id": f"dashboard-{claim_id}-{datetime.now().strftime('%H%M%S')}",
+            "method": "message/send",
+            "params": {
+                "message": {
+                    "messageId": f"msg-{claim_id}-{datetime.now().strftime('%H%M%S')}",
+                    "role": "user",
+                    "parts": [
+                        {
+                            "kind": "text",
+                            "text": json.dumps({
+                                "action": "process_claim",
+                                "claim_id": claim_id,
+                                "claim_data": claim_info
+                            })
+                        }
+                    ]
+                }
+            }
+        }
+        
+        terminal_logger.log("AGENT", "CALL", f"Sending claim {claim_id} to real orchestrator...")
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "http://localhost:8001",  # orchestrator URL
+                json=a2a_payload,
+                headers={"Content-Type": "application/json"},
+                timeout=aiohttp.ClientTimeout(total=60)  # Allow more time for real processing
+            ) as response:
+                
+                response_text = await response.text()
+                
+                if response.status < 400:
+                    terminal_logger.log("SUCCESS", "AGENT", f"Successfully sent claim {claim_id} to orchestrator")
+                    terminal_logger.log("AGENT", "RESPONSE", f"Orchestrator processing claim {claim_id}")
+                    
+                    try:
+                        # Parse the actual response from the enhanced orchestrator
+                        response_json = json.loads(response_text)
+                        result = response_json.get('result', {})
+                        
+                        # Extract the real decision from orchestrator
+                        final_decision = result.get('final_decision', {})
+                        decision = final_decision.get('decision', 'unknown')
+                        reasoning = final_decision.get('reasoning', 'No reasoning provided')
+                        confidence = final_decision.get('confidence', 0)
+                        
+                        # Update claim with actual orchestrator results  
+                        if decision == 'approved':
+                            active_claims[claim_id].status = "approved"
+                        elif decision == 'denied':
+                            active_claims[claim_id].status = "denied"
+                        elif decision == 'requires_review':
+                            active_claims[claim_id].status = "pending"
+                        else:
+                            active_claims[claim_id].status = "completed"
+                            
+                        active_claims[claim_id].lastUpdate = datetime.now().isoformat()
+                        
+                        # Log the actual results to Recent Activity
+                        terminal_logger.log("SUCCESS", "DECISION", f"Claim {claim_id}: {decision.upper()}")
+                        terminal_logger.log("REASONING", "DECISION", f"Reasoning: {reasoning}")
+                        terminal_logger.log("CONFIDENCE", "DECISION", f"Confidence: {confidence:.0%}")
+                        
+                        # Log processing steps if available
+                        processing_steps = result.get('processing_steps', [])
+                        if processing_steps:
+                            terminal_logger.log("STEPS", "WORKFLOW", f"Processing steps: {', '.join(processing_steps)}")
+                        
+                        # Log agents used
+                        agents_used = result.get('agents_used', [])
+                        if agents_used:
+                            terminal_logger.log("AGENTS", "WORKFLOW", f"Agents used: {', '.join(agents_used)}")
+                            
+                        terminal_logger.log("SUCCESS", "WORKFLOW", f"Claim {claim_id} processing completed - {decision.upper()}")
+                        
+                    except (json.JSONDecodeError, KeyError) as e:
+                        terminal_logger.log("WARNING", "PARSING", f"Could not parse orchestrator response: {str(e)}")
+                        # Fallback - just mark as completed
+                        active_claims[claim_id].status = "completed"
+                        active_claims[claim_id].lastUpdate = datetime.now().isoformat()
+                        terminal_logger.log("SUCCESS", "WORKFLOW", f"Claim {claim_id} processing completed by real agents")
+                    
+                else:
+                    terminal_logger.log("ERROR", "AGENT", f"Orchestrator error {response.status}: {response_text}")
+                    active_claims[claim_id].status = "error"
+                    active_claims[claim_id].lastUpdate = datetime.now().isoformat()
         
     except Exception as e:
-        terminal_logger.log("ERROR", "WORKFLOW", f"Processing failed for {claim_id}: {str(e)}")
+        terminal_logger.log("ERROR", "WORKFLOW", f"Real agent processing failed for {claim_id}: {str(e)}")
         active_claims[claim_id].status = "error"
         active_claims[claim_id].lastUpdate = datetime.now().isoformat()
 

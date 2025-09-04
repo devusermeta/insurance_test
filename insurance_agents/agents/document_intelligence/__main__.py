@@ -27,6 +27,24 @@ from shared.mcp_config import A2A_AGENT_PORTS
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Custom filter to hide specific agent.json requests
+class AgentJsonFilter(logging.Filter):
+    def filter(self, record):
+        # Filter out agent.json GET requests
+        if hasattr(record, 'getMessage'):
+            message = record.getMessage()
+            if '/.well-known/agent.json' in message and 'GET' in message:
+                return False
+        return True
+
+# Apply custom filter to uvicorn access logger
+uvicorn_access_logger = logging.getLogger('uvicorn.access')
+uvicorn_access_logger.addFilter(AgentJsonFilter())
+
+# Reduce other logging
+logging.getLogger('uvicorn').setLevel(logging.WARNING)
+logging.getLogger('a2a.server.apps.jsonrpc.jsonrpc_app').setLevel(logging.ERROR)
+
 load_dotenv()
 
 @click.command()
