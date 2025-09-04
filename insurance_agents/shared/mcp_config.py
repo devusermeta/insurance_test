@@ -15,20 +15,17 @@ class MCPConfig:
     COSMOS_KEY = os.getenv("AZURE_COSMOS_KEY", "your-cosmos-key")
     COSMOS_DATABASE = "insurance_claims_db"
     
-    # MCP Server URLs for different data access patterns
+    # MCP Server URLs - Using Cosmos MCP server on port 8080
     MCP_SERVERS = {
-        "claims_server": "http://localhost:9001",
-        "artifacts_server": "http://localhost:9002", 
-        "rules_server": "http://localhost:9003",
-        "events_server": "http://localhost:9004"
+        "cosmos_server": "http://localhost:8080"
     }
     
-    # Agent-specific MCP server mappings
+    # Agent-specific MCP server mappings - All agents use cosmos_server
     AGENT_MCP_MAPPING = {
-        "claims_orchestrator": ["claims_server", "artifacts_server", "rules_server", "events_server"],
-        "intake_clarifier": ["claims_server", "artifacts_server"],
-        "document_intelligence": ["artifacts_server", "claims_server"],
-        "coverage_rules_engine": ["rules_server", "claims_server"]
+        "claims_orchestrator": ["cosmos_server"],
+        "intake_clarifier": ["cosmos_server"],
+        "document_intelligence": ["cosmos_server"],
+        "coverage_rules_engine": ["cosmos_server"]
     }
     
     # Cosmos DB collections accessible through MCP
