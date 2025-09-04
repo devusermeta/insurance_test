@@ -74,7 +74,12 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
             
             # Update task status to running
             await event_queue.enqueue_event(
-                TaskStatusUpdateEvent(task_id=task.id, status=TaskStatus.running)
+                TaskStatusUpdateEvent(
+                    task_id=task.id, 
+                    status=TaskStatus(state=TaskState.working),
+                    contextId=context.context_id if hasattr(context, 'context_id') else "claims_orchestrator_context",
+                    final=False
+                )
             )
             
             # Process the request using our existing logic
@@ -103,7 +108,12 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
             
             # Send response
             await event_queue.enqueue_event(
-                TaskArtifactUpdateEvent(task_id=task.id, artifact=artifact)
+                TaskArtifactUpdateEvent(
+                    task_id=task.id, 
+                    artifact=artifact,
+                    contextId=getattr(context, 'context_id', 'default-context'),
+                    final=False
+                )
             )
             
             # Send agent message
@@ -112,7 +122,12 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
             
             # Mark task as completed
             await event_queue.enqueue_event(
-                TaskStatusUpdateEvent(task_id=task.id, status=TaskStatus.completed)
+                TaskStatusUpdateEvent(
+                    task_id=task.id, 
+                    status=TaskStatus(state=TaskState.completed),
+                    contextId=context.context_id if hasattr(context, 'context_id') else "claims_orchestrator_context",
+                    final=True
+                )
             )
             
             self.logger.info("✅ A2A execution completed successfully")
@@ -123,7 +138,12 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
             # Mark task as failed if we have one
             if 'task' in locals() and task:
                 await event_queue.enqueue_event(
-                    TaskStatusUpdateEvent(task_id=task.id, status=TaskStatus.failed)
+                    TaskStatusUpdateEvent(
+                        task_id=task.id, 
+                        status=TaskStatus(state=TaskState.failed),
+                        contextId=context.context_id if hasattr(context, 'context_id') else "claims_orchestrator_context",
+                        final=True
+                    )
                 )
             
             # Send error response
@@ -133,7 +153,12 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
             if 'task' in locals() and task:
                 artifact = new_text_artifact(task.id, error_text)
                 await event_queue.enqueue_event(
-                    TaskArtifactUpdateEvent(task_id=task.id, artifact=artifact)
+                    TaskArtifactUpdateEvent(
+                        task_id=task.id, 
+                        artifact=artifact,
+                        contextId=getattr(context, 'context_id', 'default-context'),
+                        final=True
+                    )
                 )
             
             agent_message = new_agent_text_message(error_text)
@@ -151,7 +176,12 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
             if task:
                 # Mark task as cancelled
                 await event_queue.enqueue_event(
-                    TaskStatusUpdateEvent(task_id=task.id, status=TaskStatus.cancelled)
+                    TaskStatusUpdateEvent(
+                        task_id=task.id, 
+                        status=TaskStatus(state=TaskState.cancelled),
+                        contextId=context.context_id if hasattr(context, 'context_id') else "claims_orchestrator_context",
+                        final=True
+                    )
                 )
                 
                 # Send cancellation message

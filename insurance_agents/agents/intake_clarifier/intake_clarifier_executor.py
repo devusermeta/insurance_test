@@ -192,7 +192,7 @@ class IntakeClarifierExecutor:
                 clarification_result["questions"].append("Can you provide more detailed description?")
             
             # Calculate fraud risk
-            clarification_result["fraud_risk_score"] = await self._calculate_fraud_risk(claim_data)
+            clarification_result["fraud_risk_score"] = self._calculate_fraud_risk(claim_data)
             
             # Determine validation status
             if missing_fields or clarification_result["fraud_risk_score"] > 70:
@@ -222,7 +222,7 @@ class IntakeClarifierExecutor:
         """Assess fraud risk for a claim"""
         self.logger.info("🚨 Assessing fraud risk")
         
-        fraud_score = await self._calculate_fraud_risk(claim_data)
+        fraud_score = self._calculate_fraud_risk(claim_data)
         
         risk_level = "low"
         if fraud_score > 70:
@@ -236,25 +236,6 @@ class IntakeClarifierExecutor:
             "factors": self._get_fraud_factors(claim_data),
             "recommendations": self._get_fraud_recommendations(fraud_score)
         }
-    
-    async def _calculate_fraud_risk(self, claim_data: Dict[str, Any]) -> int:
-        """Calculate fraud risk score (0-100)"""
-        risk_score = 0
-        
-        # Check description quality
-        description = claim_data.get('description', '').lower()
-        if len(description) < 10:
-            risk_score += 20
-        
-        # Check for high-risk keywords
-        high_risk_keywords = ['total loss', 'stolen', 'fire', 'flood']
-        risk_keywords_found = sum(1 for keyword in high_risk_keywords if keyword in description)
-        risk_score += risk_keywords_found * 15
-        
-        # Check claim timing (mock weekend logic)
-        risk_score += 10  # Mock timing risk
-        
-        return min(risk_score, 100)
     
     def _get_fraud_factors(self, claim_data: Dict[str, Any]) -> List[str]:
         """Get factors contributing to fraud risk"""
@@ -464,5 +445,3 @@ class IntakeClarifierExecutor:
             self.logger.info("🧹 Resources cleaned up successfully")
         except Exception as e:
             self.logger.error(f"❌ Error during cleanup: {str(e)}")
-        
-        return recommendations

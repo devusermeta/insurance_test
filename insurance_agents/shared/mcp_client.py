@@ -19,6 +19,46 @@ class MCPClient:
         self.mcp_server_url = mcp_server_url
         self.logger = logging.getLogger(f"MCPClient")
         self.client = httpx.AsyncClient(timeout=30.0)
+        self.session_id = None
+    
+    async def _initialize_session(self):
+        """Initialize MCP session if not already done"""
+        if self.session_id is None:
+            try:
+                # Create a new session with the MCP server
+                init_payload = {
+                    "jsonrpc": "2.0",
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {}
+                    },
+                    "id": "init"
+                }
+                
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                }
+                
+                response = await self.client.post(
+                    f"{self.mcp_server_url}/mcp",
+                    json=init_payload,
+                    headers=headers
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    # Extract session ID from response headers if available
+                    self.session_id = response.headers.get('X-Session-ID', 'default-session')
+                    self.logger.info(f"✅ MCP session initialized: {self.session_id}")
+                else:
+                    self.logger.warning(f"⚠️ Session init failed, using default session")
+                    self.session_id = 'default-session'
+                    
+            except Exception as e:
+                self.logger.warning(f"⚠️ Session init error, using default: {str(e)}")
+                self.session_id = 'default-session'
     
     async def execute_tool(self, tool_name: str, parameters: Dict[str, Any] = None) -> Dict[str, Any]:
         """
@@ -32,6 +72,9 @@ class MCPClient:
             Tool execution result
         """
         try:
+            # Initialize session if needed
+            await self._initialize_session()
+            
             if parameters is None:
                 parameters = {}
                 
@@ -48,10 +91,11 @@ class MCPClient:
                 "id": 1
             }
             
-            # Make request to MCP server with proper headers for content negotiation
+            # Make request to MCP server with session ID
             headers = {
                 "Content-Type": "application/json",
-                "Accept": "application/json, text/event-stream"
+                "Accept": "application/json, text/event-stream",
+                "X-Session-ID": self.session_id
             }
             
             response = await self.client.post(

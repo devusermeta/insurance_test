@@ -47,19 +47,41 @@ class A2AClient:
                 parameters = {}
                 
             agent_url = self._get_agent_url(target_agent)
-            self.logger.info(f"📤 Sending A2A request to {target_agent}: {task}")
+            self.logger.info(f"📤 Sending A2A request to {target_agent} at {agent_url}: {task}")
             
-            # Prepare A2A request payload
+            # Prepare proper A2A request payload using message/send method
+            import uuid
+            
+            # Create the task text with parameters
+            task_text = f"Task: {task}"
+            if parameters:
+                task_text += f". Parameters: {json.dumps(parameters)}"
+            
             payload = {
-                "task": task,
-                "parameters": parameters,
-                "source_agent": self.source_agent,
-                "timestamp": datetime.now().isoformat()
+                "jsonrpc": "2.0",
+                "id": f"a2a-{target_agent}-{uuid.uuid4()}",
+                "method": "message/send",
+                "params": {
+                    "message": {
+                        "messageId": f"msg-{uuid.uuid4()}",
+                        "role": "user",
+                        "parts": [
+                            {
+                                "kind": "text",
+                                "text": task_text
+                            }
+                        ]
+                    },
+                    "context_id": f"ctx-{uuid.uuid4()}",
+                    "message_id": f"msg-{uuid.uuid4()}"
+                }
             }
             
-            # Send request to target agent
+            self.logger.info(f"🔗 Making A2A POST request to: {agent_url}")
+            
+            # Send request to target agent using correct A2A protocol
             response = await self.client.post(
-                f"{agent_url}/execute",
+                agent_url,  # No /execute suffix - use root endpoint
                 json=payload,
                 headers={"Content-Type": "application/json"}
             )
@@ -67,6 +89,38 @@ class A2AClient:
             if response.status_code == 200:
                 result = response.json()
                 self.logger.info(f"✅ A2A request to {target_agent} completed successfully")
+                
+                # Extract content from A2A response format
+                if "result" in result and result["result"]:
+                    # Get the message content from the A2A response
+                    messages = result["result"].get("messages", [])
+                    if messages:
+                        # Get the latest assistant message
+                        assistant_message = None
+                        for msg in reversed(messages):
+                            if msg.get("role") == "assistant":
+                                assistant_message = msg
+                                break
+                        
+                        if assistant_message and "parts" in assistant_message:
+                            # Extract text from parts
+                            content_parts = []
+                            for part in assistant_message["parts"]:
+                                if part.get("type") == "text":
+                                    content_parts.append(part["text"])
+                            
+                            if content_parts:
+                                content_text = "\n".join(content_parts)
+                                
+                                # Try to parse as JSON if it looks like structured data
+                                try:
+                                    parsed_content = json.loads(content_text)
+                                    return parsed_content
+                                except json.JSONDecodeError:
+                                    # Return as text if not JSON
+                                    return {"content": content_text, "status": "success"}
+                
+                # Fallback: return the full result if we can't parse it
                 return result
             else:
                 error_msg = f"A2A request failed: {response.status_code} - {response.text}"

@@ -20,7 +20,7 @@ from a2a.server.tasks import InMemoryTaskStore, InMemoryPushNotificationConfigSt
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from dotenv import load_dotenv
 
-from agents.coverage_rules_engine.coverage_rules_executor import CoverageRulesExecutor
+from agents.coverage_rules_engine.coverage_rules_executor_fixed import CoverageRulesExecutorFixed as CoverageRulesExecutor
 from shared.mcp_config import A2A_AGENT_PORTS
 
 # Configure logging
