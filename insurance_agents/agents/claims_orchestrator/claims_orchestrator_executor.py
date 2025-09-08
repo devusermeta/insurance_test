@@ -702,9 +702,10 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
         try:
             self.logger.info("🎯 Analyzing results from all agents for final decision...")
             
-            # Extract key decision factors
-            claim_amount = claim_data.get('amount', 0)
-            claim_type = claim_data.get('type', 'unknown')
+            # Extract key decision factors - handle nested claim_data structure
+            nested_claim_data = claim_data.get('claim_data', claim_data)
+            claim_amount = nested_claim_data.get('amount', 0)
+            claim_type = nested_claim_data.get('type', 'unknown')
             
             # Extract results from agent processing
             clarification_result = processing_results.get('clarification', {})
