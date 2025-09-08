@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import sys
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from pathlib import Path
@@ -134,6 +135,18 @@ class ProcessingRequest(BaseModel):
     priority: str = "normal"
     employeeId: str
 
+class ChatMessage(BaseModel):
+    """Chat message model"""
+    message: str
+    sessionId: str
+    timestamp: str
+
+class ChatResponse(BaseModel):
+    """Chat response model"""
+    response: str
+    sessionId: str
+    timestamp: str
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Unified Insurance Management Dashboard",
@@ -155,6 +168,7 @@ active_claims: Dict[str, ClaimStatus] = {}
 registered_agents: Dict[str, AgentInfo] = {}
 agent_cards: Dict[str, Dict] = {}  # Store agent cards for detailed info
 processing_logs: List[Dict] = []
+chat_sessions: Dict[str, List[Dict]] = {}  # Store chat history by session ID
 
 terminal_logger = TerminalLogger()
 
@@ -881,6 +895,174 @@ async def simulate_claim_processing(claim_id: str):
         terminal_logger.log("ERROR", "WORKFLOW", f"Real agent processing failed for {claim_id}: {str(e)}")
         active_claims[claim_id].status = "error"
         active_claims[claim_id].lastUpdate = datetime.now().isoformat()
+
+# ============= CHAT FUNCTIONALITY =============
+
+@app.post("/api/chat")
+async def chat_with_orchestrator(chat_request: ChatMessage):
+    """Chat with Claims Orchestrator via MCP tools"""
+    try:
+        terminal_logger.log("CHAT", "MESSAGE", f"Session {chat_request.sessionId[:8]}...: {chat_request.message[:50]}...")
+        
+        # Initialize session if not exists
+        if chat_request.sessionId not in chat_sessions:
+            chat_sessions[chat_request.sessionId] = []
+        
+        # Store user message
+        chat_sessions[chat_request.sessionId].append({
+            "role": "user",
+            "content": chat_request.message,
+            "timestamp": chat_request.timestamp
+        })
+        
+        # Prepare A2A payload for Claims Orchestrator with proper JSON-RPC 2.0 format
+        a2a_payload = {
+            "jsonrpc": "2.0",
+            "id": f"chat-{chat_request.sessionId}-{uuid.uuid4()}",
+            "method": "message/send",
+            "params": {
+                "message": {
+                    "messageId": f"msg-{uuid.uuid4()}",
+                    "role": "user",
+                    "parts": [
+                        {
+                            "kind": "text",
+                            "text": f"Chat Query: {chat_request.message}"
+                        }
+                    ]
+                },
+                "context_id": f"chat_{chat_request.sessionId}",
+                "message_id": f"msg-{uuid.uuid4()}"
+            }
+        }
+        
+        terminal_logger.log("CHAT", "ORCHESTRATOR", "Forwarding chat message to Claims Orchestrator...")
+        
+        # Send to Claims Orchestrator
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "http://localhost:8001",  # Claims Orchestrator URL
+                json=a2a_payload,
+                headers={"Content-Type": "application/json"},
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                
+                if response.status == 200:
+                    result = await response.json()
+                    
+                    # Extract response text from A2A response - improved parsing
+                    orchestrator_response = "I'm here to help! However, I couldn't process your request at the moment."
+                    
+                    if isinstance(result, dict):
+                        # First, try to get the response from artifacts or content
+                        if "artifacts" in result and result["artifacts"]:
+                            # A2A response with artifacts
+                            first_artifact = result["artifacts"][0]
+                            if "content" in first_artifact:
+                                orchestrator_response = first_artifact["content"]
+                        elif "messages" in result and result["messages"]:
+                            # A2A response with messages
+                            for msg in result["messages"]:
+                                if msg.get("role") == "assistant" and "content" in msg:
+                                    orchestrator_response = msg["content"]
+                                    break
+                        elif "response" in result:
+                            orchestrator_response = result["response"]
+                        elif "content" in result:
+                            orchestrator_response = result["content"] 
+                        elif "message" in result:
+                            orchestrator_response = result["message"]
+                        elif "result" in result and isinstance(result["result"], str):
+                            orchestrator_response = result["result"]
+                        else:
+                            # Try to extract from common A2A response patterns
+                            if "taskId" in result or "contextId" in result:
+                                # This looks like an A2A response, try to extract meaningful content
+                                orchestrator_response = f"I processed your request about: '{chat_request.message}'. The system is working on it."
+                            else:
+                                # Fallback: stringify the result if it contains useful info
+                                orchestrator_response = f"I received your request about: '{chat_request.message}'\n\nHere's what I found: {json.dumps(result, indent=2)}"
+                    elif isinstance(result, str):
+                        # Direct string response
+                        orchestrator_response = result
+                    
+                    # Store assistant response
+                    chat_sessions[chat_request.sessionId].append({
+                        "role": "assistant", 
+                        "content": orchestrator_response,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    
+                    terminal_logger.log("CHAT", "SUCCESS", f"Response sent for session {chat_request.sessionId[:8]}...")
+                    
+                    return ChatResponse(
+                        response=orchestrator_response,
+                        sessionId=chat_request.sessionId,
+                        timestamp=datetime.now().isoformat()
+                    )
+                    
+                else:
+                    error_text = await response.text()
+                    terminal_logger.log("CHAT", "ERROR", f"Orchestrator returned {response.status}: {error_text[:100]}...")
+                    
+                    error_response = f"Sorry, I'm having trouble connecting to the Claims Orchestrator (Status: {response.status}). Please make sure the orchestrator is running on port 8001 and try again."
+                    
+                    chat_sessions[chat_request.sessionId].append({
+                        "role": "assistant",
+                        "content": error_response,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    
+                    return ChatResponse(
+                        response=error_response,
+                        sessionId=chat_request.sessionId,
+                        timestamp=datetime.now().isoformat()
+                    )
+                    
+    except aiohttp.ClientError as e:
+        terminal_logger.log("CHAT", "ERROR", f"Connection error: {str(e)}")
+        error_response = f"I'm unable to connect to the Claims Orchestrator. Please ensure it's running on port 8001. Error: {str(e)}"
+        
+        # Store error response
+        if chat_request.sessionId in chat_sessions:
+            chat_sessions[chat_request.sessionId].append({
+                "role": "assistant",
+                "content": error_response,
+                "timestamp": datetime.now().isoformat()
+            })
+        
+        return ChatResponse(
+            response=error_response,
+            sessionId=chat_request.sessionId,
+            timestamp=datetime.now().isoformat()
+        )
+        
+    except Exception as e:
+        terminal_logger.log("CHAT", "ERROR", f"Chat processing failed: {str(e)}")
+        error_response = f"Sorry, I encountered an unexpected error: {str(e)}. Please try again."
+        
+        # Store error response
+        if chat_request.sessionId in chat_sessions:
+            chat_sessions[chat_request.sessionId].append({
+                "role": "assistant",
+                "content": error_response,
+                "timestamp": datetime.now().isoformat()
+            })
+        
+        return ChatResponse(
+            response=error_response,
+            sessionId=chat_request.sessionId,
+            timestamp=datetime.now().isoformat()
+        )
+
+@app.get("/api/chat/history/{session_id}")
+async def get_chat_history(session_id: str):
+    """Get chat history for a session"""
+    if session_id in chat_sessions:
+        return {"sessionId": session_id, "messages": chat_sessions[session_id]}
+    return {"sessionId": session_id, "messages": []}
+
+# ============= END CHAT FUNCTIONALITY =============
 
 if __name__ == "__main__":
     terminal_logger.log("DASHBOARD", "START", "Starting Insurance Claims Processing Dashboard...")

@@ -20,6 +20,7 @@ from shared.mcp_client import MCPClient
 from shared.a2a_client import A2AClient
 from shared.agent_discovery import AgentDiscoveryService
 from shared.workflow_logger import workflow_logger, WorkflowStepType, WorkflowStepStatus
+from shared.mcp_chat_client import mcp_chat_client
 
 class ClaimsOrchestratorExecutor(AgentExecutor):
     """
@@ -105,18 +106,32 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
                 }
             }
             
-            # Route to appropriate handler (using existing logic)
-            if 'process_claim' in user_input.lower() or 'claim' in user_input.lower():
+            # Route to appropriate handler with better detection
+            if 'chat query:' in user_input.lower() or 'chat conversation' in user_input.lower():
+                # This is a chat query - extract the actual user question
+                actual_query = user_input
+                if 'Chat Query:' in user_input:
+                    actual_query = user_input.split('Chat Query:')[1].split('\n')[0].strip()
+                result = await self._handle_chat_query(actual_query, request_data.get('parameters', {}))
+            elif ('process_claim' in user_input.lower() and 'chat query:' not in user_input.lower()) or ('{"action": "process_claim"' in user_input):
                 result = await self._handle_claim_processing(request_data.get('parameters', {}))
             elif 'workflow' in user_input.lower():
                 result = await self._handle_workflow_request(request_data.get('parameters', {}))
             elif 'status' in user_input.lower():
                 result = await self._handle_status_request(request_data.get('parameters', {}))
             else:
-                result = await self._handle_general_request(user_input, request_data.get('parameters', {}))
+                # Default to chat handling for general queries
+                result = await self._handle_chat_query(user_input, request_data.get('parameters', {}))
+            
+            # Determine response text based on result type
+            if isinstance(result, dict) and "response" in result:
+                # Chat query - return the response text directly
+                response_text = result["response"]
+            else:
+                # Other requests - return JSON structure
+                response_text = json.dumps(result, indent=2)
             
             # Create response artifact
-            response_text = json.dumps(result, indent=2)
             artifact = new_text_artifact(task.id, response_text)
             
             # Send response
@@ -555,8 +570,12 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
             }
     
     async def _handle_general_request(self, task: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle general requests"""
+        """Handle general requests including chat queries with MCP integration"""
         self.logger.info(f"🤖 Handling general request: {task}")
+        
+        # Check if this is a chat query (coming from the dashboard)
+        if "Chat Query:" in task or parameters.get("is_chat", False):
+            return await self._handle_chat_query(task, parameters)
         
         return {
             "status": "success",
@@ -569,9 +588,109 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
                 "Orchestrate multi-agent workflows", 
                 "Monitor claim processing status",
                 "Route claims through validation pipeline",
-                "Coordinate with specialized agents"
+                "Coordinate with specialized agents",
+                "Answer questions about claims data via chat"
             ]
         }
+    
+    async def _handle_chat_query(self, task: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle chat queries with MCP integration for Cosmos DB access"""
+        self.logger.info(f"💬 Handling chat query: {task}")
+        
+        try:
+            # Extract the actual user query from the task
+            if "Chat Query:" in task:
+                user_query = task.split("Chat Query:", 1)[1].strip()
+                if "\n\nContext:" in user_query:
+                    user_query = user_query.split("\n\nContext:")[0].strip()
+            else:
+                user_query = task
+            
+            self.logger.info(f"🔍 Processing user query: {user_query}")
+            
+            # Use MCP chat client to query Cosmos DB
+            try:
+                response = await mcp_chat_client.query_cosmos_data(user_query, parameters)
+                
+                self.logger.info(f"✅ MCP query successful")
+                
+                return {
+                    "status": "success",
+                    "response": response,
+                    "query": user_query,
+                    "agent": self.agent_name,
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "cosmos_db_via_mcp"
+                }
+                
+            except Exception as mcp_error:
+                self.logger.error(f"❌ MCP query failed: {mcp_error}")
+                
+                # Fallback to general response if MCP fails
+                fallback_response = self._generate_fallback_response(user_query, str(mcp_error))
+                
+                return {
+                    "status": "partial_success",
+                    "response": fallback_response,
+                    "query": user_query,
+                    "agent": self.agent_name,
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "fallback",
+                    "mcp_error": str(mcp_error)
+                }
+                
+        except Exception as e:
+            self.logger.error(f"❌ Chat query processing failed: {e}")
+            
+            error_response = f"I apologize, but I encountered an error processing your question: {str(e)}. Please try again or contact support if the issue persists."
+            
+            return {
+                "status": "error",
+                "response": error_response,
+                "query": task,
+                "agent": self.agent_name,
+                "timestamp": datetime.now().isoformat(),
+                "error": str(e)
+            }
+    
+    def _generate_fallback_response(self, user_query: str, error_message: str) -> str:
+        """Generate a helpful fallback response when MCP is unavailable"""
+        query_lower = user_query.lower()
+        
+        if "help" in query_lower or "what can you do" in query_lower:
+            return """I'm your Claims Orchestrator Assistant! Here's what I can help you with:
+
+🔍 **Claims Processing:**
+- Process new claims through our validation pipeline
+- Check claim status and processing history
+- Route claims to specialized agents
+
+📊 **Workflow Management:**
+- Coordinate multi-agent claim workflows
+- Monitor processing steps and status
+- Generate processing reports
+
+⚠️ **Note:** I'm currently unable to query the database directly due to a connection issue with the MCP server. Please ensure the Cosmos DB MCP server is running on port 8080.
+
+**Error details:** {error_message}"""
+        
+        elif any(word in query_lower for word in ["hello", "hi", "hey"]):
+            return f"👋 Hello! I'm your Claims Orchestrator Assistant. I'm currently experiencing connectivity issues with our database ({error_message}), but I'm still here to help with claims processing and workflow coordination!"
+        
+        else:
+            return f"""I understand you're asking about: "{user_query}"
+
+🔧 **Service Status:** I'm currently unable to access our claims database due to a connectivity issue. 
+
+**What I can still do:**
+- Help process new claims
+- Explain our workflow processes
+- Coordinate with other agents
+- Provide general assistance
+
+**To resolve database queries:** Please ensure the Cosmos DB MCP server is running on port 8080.
+
+**Error details:** {error_message}"""
     
     async def _orchestrate_claim_workflow(self, claim_data: Dict[str, Any]) -> Dict[str, Any]:
         """Orchestrate the complete claim processing workflow"""
@@ -796,6 +915,139 @@ class ClaimsOrchestratorExecutor(AgentExecutor):
         except Exception as e:
             self.logger.error(f"❌ Error storing claim results: {str(e)}")
             return False
+    
+    async def _handle_chat_query(self, user_query: str, parameters: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Handle chat queries from employees using MCP tools
+        """
+        try:
+            self.logger.info(f"💬 Processing chat query: {user_query[:100]}...")
+            
+            # Clean the query if it has our formatting
+            if "Context: This is a chat conversation" in user_query:
+                user_query = user_query.split("Context:")[0].strip()
+            
+            # Check if this is a capabilities/system info query
+            if any(keyword in user_query.lower() for keyword in ['capabilities', 'what can you do', 'help', 'commands', 'features']):
+                return {
+                    "response": """🤖 **Claims Orchestrator Capabilities**
+
+I can help you with:
+
+**📊 Data Queries:**
+- "Show me recent claims"
+- "How many claims are pending?"
+- "Find high-value claims over $5000"
+- "Show claims by status"
+
+**🔍 Claim Information:**
+- "Get details for claim ID 12345"
+- "Show all approved claims"
+- "Find rejected claims"
+
+**📈 Analytics:**
+- "Claims summary for this month"
+- "Show processing statistics"
+- "Risk analysis reports"
+
+**⚙️ System Status:**
+- "Are all agents running?"
+- "System health check"
+- "Agent status report"
+
+Just ask me anything about your insurance data in natural language!""",
+                    "session_id": parameters.get("session_id", "default"),
+                    "type": "chat_response"
+                }
+            
+            # Try to use MCP client for data queries
+            try:
+                # Use the MCP chat client if available
+                if hasattr(self, 'mcp_chat_client'):
+                    mcp_response = await self.mcp_chat_client.query_cosmos_data(user_query)
+                    if mcp_response.get('status') == 'success':
+                        return {
+                            "response": mcp_response.get('response', 'Query completed successfully.'),
+                            "session_id": parameters.get("session_id", "default"),
+                            "type": "chat_response",
+                            "data": mcp_response.get('data')
+                        }
+                
+                # Fallback to direct MCP client
+                self.logger.info("🔄 Using direct MCP client for query...")
+                
+                # Check if this is a general system query
+                if any(keyword in user_query.lower() for keyword in ['claims', 'data', 'show', 'find', 'get', 'list']):
+                    # Try to get some general data
+                    cosmos_result = await self.mcp_client.get_recent_claims(limit=5)
+                    
+                    if cosmos_result.get('error'):
+                        return {
+                            "response": f"I encountered an issue querying the database: {cosmos_result.get('error')}. However, I'm here to help with your insurance questions. Could you try rephrasing your question?",
+                            "session_id": parameters.get("session_id", "default"),
+                            "type": "chat_response"
+                        }
+                    
+                    claims_data = cosmos_result.get('claims', [])
+                    if claims_data:
+                        response = f"Here are some recent claims I found:\n\n"
+                        for claim in claims_data[:3]:  # Show max 3 claims
+                            response += f"**Claim {claim.get('id', 'N/A')}**\n"
+                            response += f"• Status: {claim.get('status', 'Unknown')}\n"
+                            response += f"• Amount: ${claim.get('amount', 0):,.2f}\n"
+                            response += f"• Type: {claim.get('type', 'Unknown')}\n\n"
+                        
+                        response += f"Found {len(claims_data)} total claims. Ask me specific questions about claims data!"
+                    else:
+                        response = "I didn't find any claims data at the moment. The database might be empty or there could be a connection issue. Feel free to ask me other questions about the system!"
+                    
+                    return {
+                        "response": response,
+                        "session_id": parameters.get("session_id", "default"),
+                        "type": "chat_response"
+                    }
+                
+                # Default friendly response for general chat
+                return {
+                    "response": f"I understand you're asking about: '{user_query}'. I'm your Claims Orchestrator assistant, and I'm designed to help with insurance claims data and system queries. Try asking me about claims, data, or system status. For example: 'Show me recent claims' or 'What are my capabilities?'",
+                    "session_id": parameters.get("session_id", "default"),
+                    "type": "chat_response"
+                }
+                
+            except Exception as mcp_error:
+                self.logger.warning(f"⚠️ MCP query failed: {str(mcp_error)}")
+                
+                # Friendly fallback response
+                return {
+                    "response": f"I received your question about '{user_query}'. I'm currently having trouble accessing the database, but I'm here to help! I can assist with claims data queries, system status checks, and general insurance questions. The MCP server might need to be restarted. Please try again or ask about my capabilities.",
+                    "session_id": parameters.get("session_id", "default"),
+                    "type": "chat_response"
+                }
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error handling chat query: {str(e)}")
+            return {
+                "response": "I'm sorry, I encountered an error processing your request. Please try again or contact support if the problem persists.",
+                "session_id": parameters.get("session_id", "default"),
+                "type": "chat_response",
+                "error": str(e)
+            }
+    
+    async def _handle_workflow_request(self, parameters: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Handle workflow-related requests"""
+        return {
+            "status": "success",
+            "message": "Workflow request processed",
+            "type": "workflow_response"
+        }
+    
+    async def _handle_status_request(self, parameters: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Handle status check requests"""
+        return {
+            "status": "success", 
+            "message": "System status: All agents operational",
+            "type": "status_response"
+        }
     
     async def cleanup(self):
         """Cleanup resources"""

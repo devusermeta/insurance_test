@@ -1,15 +1,15 @@
 """
-Claims Orchestrator Agent - A2A Protocol Implementation
-Main orchestration agent that coordinates the entire claims processing workflow
+Intelligent Claims Orchestrator Agent - Azure AI Powered
+Main orchestration agent that uses Azure AI Foundry for intelligent routing
 """
 
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
+import asyncio
 import logging
 import click
-import httpx
 from typing import Dict, Any
 from datetime import datetime
 
@@ -20,7 +20,7 @@ from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from dotenv import load_dotenv
 
 from shared.mcp_config import A2A_AGENT_PORTS
-from agents.claims_orchestrator.claims_orchestrator_executor import ClaimsOrchestratorExecutor
+from agents.claims_orchestrator.intelligent_orchestrator import IntelligentClaimsOrchestrator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -45,21 +45,51 @@ logging.getLogger('a2a.server.apps.jsonrpc.jsonrpc_app').setLevel(logging.ERROR)
 
 load_dotenv()
 
+async def initialize_intelligent_orchestrator():
+    """Initialize the intelligent orchestrator with Azure AI"""
+    logger.info("🧠 Initializing Intelligent Claims Orchestrator...")
+    
+    # Create orchestrator instance
+    orchestrator = IntelligentClaimsOrchestrator()
+    
+    try:
+        # Initialize agent discovery
+        await orchestrator.initialize()
+        
+        # Create Azure AI agent if available
+        if orchestrator.agents_client:
+            orchestrator.create_azure_agent()
+            logger.info("✅ Azure AI agent created successfully!")
+        else:
+            logger.warning("⚠️ Running without Azure AI - using fallback routing")
+        
+        logger.info(f"🎯 Available agents: {list(orchestrator.available_agents.keys())}")
+        return orchestrator
+        
+    except Exception as e:
+        logger.error(f"❌ Error initializing orchestrator: {e}")
+        raise
+
 @click.command()
 @click.option('--host', default='localhost')
 @click.option('--port', default=A2A_AGENT_PORTS["claims_orchestrator"])
 def main(host, port):
-    """Starts the Claims Orchestrator Agent server using A2A."""
+    """Starts the Intelligent Claims Orchestrator Agent server using A2A + Azure AI."""
     
     # Initialize with proper logging
-    logger.info("🏥 Claims Orchestrator Agent initialized")
-    logger.info(f"🔧 Agent skills: ['Claims Processing Orchestration', 'Insurance Workflow Management']")
+    logger.info("🧠 Intelligent Claims Orchestrator Agent initialized")
+    logger.info(f"🔧 Agent capabilities: AI-powered routing, dynamic workflows, natural conversations")
     logger.info(f"🌐 Starting server on http://{host}:{port}")
     
+    # Initialize the orchestrator
+    import asyncio
+    orchestrator = asyncio.run(initialize_intelligent_orchestrator())
+    
+    import httpx
     httpx_client = httpx.AsyncClient()
     push_config_store = InMemoryPushNotificationConfigStore()
     request_handler = DefaultRequestHandler(
-        agent_executor=ClaimsOrchestratorExecutor(),
+        agent_executor=orchestrator,  # Use our intelligent orchestrator
         task_store=InMemoryTaskStore(),
         push_config_store=push_config_store,
         push_sender=BasePushNotificationSender(httpx_client, push_config_store),
@@ -69,15 +99,13 @@ def main(host, port):
         agent_card=get_agent_card(host, port), http_handler=request_handler
     )
     
-    logger.info("✅ Enhanced Claims Orchestrator with detailed agent discovery ready!")
+    logger.info("✅ Intelligent Claims Orchestrator with Azure AI ready!")
     
     # Apply custom filter to reduce agent.json polling noise
     import logging
+    import uvicorn  # Add explicit import
     uvicorn_access_logger = logging.getLogger('uvicorn.access')
     uvicorn_access_logger.addFilter(AgentJsonFilter())
-    
-    # Add debugging for incoming requests
-    import uvicorn
     logger.info("🚀 Starting enhanced orchestrator server...")
     uvicorn.run(server.build(), host=host, port=port, log_level="info")
 
@@ -91,32 +119,34 @@ def get_agent_card(host: str, port: int):
         id='claims_orchestration',
         name='Claims Processing Orchestration',
         description=(
-            'Coordinates the complete insurance claims processing workflow, '
-            'managing interactions between intake clarification, document analysis, '
-            'and coverage evaluation agents to ensure efficient claim processing.'
+            'AI-powered intelligent orchestrator that dynamically routes insurance requests '
+            'to appropriate specialist agents using Azure AI Foundry. Provides natural '
+            'language conversations and adaptive workflows without hardcoded processes.'
         ),
-        tags=['insurance', 'claims', 'orchestration', 'workflow', 'coordination'],
+        tags=['ai', 'intelligent', 'azure', 'dynamic-routing', 'conversation', 'orchestration'],
         examples=[
-            'Process a new auto insurance claim with documents',
-            'Coordinate claim workflow between multiple agents',
-            'Check status of claim processing pipeline',
-            'Route claim through validation and approval process'
+            'What are your capabilities?',
+            'Help me process a claim with documents',
+            'Find information about a specific policy',
+            'Route my request to the right specialist',
+            'Query our insurance database'
         ],
     )
 
-    skill_workflow_management = AgentSkill(
-        id='workflow_management',
-        name='Insurance Workflow Management',
+    skill_ai_routing = AgentSkill(
+        id='ai_powered_routing',
+        name='AI-Powered Intelligent Routing',
         description=(
-            'Manages complex insurance workflows including claim intake, '
-            'validation, document processing, fraud detection, and coverage evaluation.'
+            'Uses Azure AI Foundry to analyze requests and dynamically determine '
+            'the best agents to handle each task. Supports natural language conversations '
+            'and adaptive workflow orchestration based on context and agent capabilities.'
         ),
-        tags=['workflow', 'insurance', 'automation', 'process-management'],
+        tags=['ai', 'azure', 'routing', 'conversation', 'adaptive', 'intelligence'],
         examples=[
-            'Start claim processing workflow for customer',
-            'Monitor claim processing status across agents',
-            'Handle workflow exceptions and escalations',
-            'Generate workflow completion reports'
+            'Analyze this request and route to the right agent',
+            'Have a conversation about insurance operations',
+            'Dynamically create workflows based on request type',
+            'Use AI to determine the best processing approach'
         ],
     )
 
@@ -133,7 +163,7 @@ def get_agent_card(host: str, port: int):
         defaultInputModes=['text'],
         defaultOutputModes=['text'],
         capabilities=capabilities,
-        skills=[skill_claims_orchestration, skill_workflow_management],
+        skills=[skill_claims_orchestration, skill_ai_routing],
     )
 
     return agent_card
