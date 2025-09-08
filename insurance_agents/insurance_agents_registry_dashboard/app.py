@@ -101,6 +101,21 @@ class ClaimStatus(BaseModel):
     submitDate: str
     lastUpdate: str
     assignedEmployee: Optional[str] = None
+    # Additional fields to fix "undefined" issues in UI
+    patientName: Optional[str] = None
+    provider: Optional[str] = None
+    memberId: Optional[str] = None
+    region: Optional[str] = None
+    
+    # Add aliases for HTML template compatibility
+    amount: Optional[float] = None  # Will be set to amountBilled
+    submitted: Optional[str] = None  # Will be set to submitDate
+    
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Set aliases automatically
+        self.amount = self.amountBilled
+        self.submitted = self.submitDate
 
 class AgentInfo(BaseModel):
     """Insurance agent information"""
@@ -326,7 +341,12 @@ async def load_sample_claims():
                                     amountBilled=float(item.get("amountBilled", 0)),
                                     submitDate=item.get("submitDate", ""),
                                     lastUpdate=datetime.now().isoformat(),
-                                    assignedEmployee=None
+                                    assignedEmployee=None,
+                                    # Fix undefined values with proper field mapping
+                                    patientName=item.get("memberId", f"Patient-{item.get('claimId', 'Unknown')}"),
+                                    provider=item.get("provider", "Unknown Provider"),
+                                    memberId=item.get("memberId", "Unknown"),
+                                    region=item.get("region", "US")
                                 )
                                 active_claims[claim.claimId] = claim
                                 terminal_logger.log("COSMOS", "LOAD", f"Loaded REAL claim: {claim.claimId} - ${claim.amountBilled} ({item.get('provider', 'N/A')})")
@@ -352,7 +372,11 @@ async def load_sample_claims():
             "amountBilled": 180.0,
             "submitDate": "2025-08-21",
             "lastUpdate": datetime.now().isoformat(),
-            "assignedEmployee": None
+            "assignedEmployee": None,
+            "patientName": "John Smith",
+            "provider": "CLN-ALPHA",
+            "memberId": "M-001",
+            "region": "US"
         },
         {
             "claimId": "OP-1002", 
@@ -361,7 +385,11 @@ async def load_sample_claims():
             "amountBilled": 220.0,
             "submitDate": "2025-08-19", 
             "lastUpdate": datetime.now().isoformat(),
-            "assignedEmployee": "emp_001"
+            "assignedEmployee": "emp_001",
+            "patientName": "Jane Doe",
+            "provider": "CLN-BETA",
+            "memberId": "M-002",
+            "region": "US"
         },
         {
             "claimId": "IP-2001",
@@ -370,7 +398,11 @@ async def load_sample_claims():
             "amountBilled": 14000.0,
             "submitDate": "2025-08-10",
             "lastUpdate": datetime.now().isoformat(),
-            "assignedEmployee": "emp_002"
+            "assignedEmployee": "emp_002",
+            "patientName": "Robert Johnson",
+            "provider": "HSP-GAMMA",
+            "memberId": "M-004",
+            "region": "US"
         }
     ]
     
@@ -608,22 +640,23 @@ async def simulate_claim_processing(claim_id: str):
             terminal_logger.log("ERROR", "WORKFLOW", f"Claim data not found for {claim_id}")
             return
         
-        # Debug: Log the claim_data attributes
-        terminal_logger.log("DEBUG", "WORKFLOW", f"Claim data type: {type(claim_data)}")
-        terminal_logger.log("DEBUG", "WORKFLOW", f"Available attributes: {[attr for attr in dir(claim_data) if not attr.startswith('_')]}")
-        
-        # Convert claim data to proper format
+        # Convert claim data to proper format  
         claim_info = {
             "claim_id": claim_id,
-            "type": getattr(claim_data, 'category', 'auto').lower() if getattr(claim_data, 'category', None) else "auto",
-            "amount": float(getattr(claim_data, 'amountBilled', 15000.0)),
+            "type": claim_data.category.lower() if claim_data.category else "outpatient",
+            "amount": float(claim_data.amountBilled),
             "description": f"Insurance claim processing for {claim_id}",
-            "customer_id": getattr(claim_data, 'assignedEmployee', 'UNKNOWN') or "UNKNOWN",
+            "customer_id": claim_data.assignedEmployee or "emp23", 
             "policy_number": f"POL_{claim_id}",
             "incident_date": "2024-01-15",
-            "location": "Dashboard Processing",
+            "location": "Dashboard Processing", 
             "documents": ["claim_form.pdf", "supporting_documents.pdf"],
-            "customer_statement": f"Processing {getattr(claim_data, 'category', 'general')} claim through dashboard interface"
+            "customer_statement": f"Processing {claim_data.category} claim through dashboard interface",
+            # Include additional fields for proper processing
+            "patient_name": claim_data.patientName or f"Patient-{claim_id}",
+            "provider": claim_data.provider or "Unknown Provider",
+            "member_id": claim_data.memberId or "Unknown", 
+            "region": claim_data.region or "US"
         }
         
         # Send to real orchestrator using A2A protocol

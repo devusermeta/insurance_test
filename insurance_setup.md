@@ -1,5 +1,9 @@
 cd insurance_agents;.\.venv\Scripts\activate;$env:PYTHONPATH = "D:\Metakaal\insurance\insurance_agents"
 
+cd D:\Metakaal\insurance\insurance_agents\insurance_agents_registry_dashboard
+
+
+
 # Option 1: Run as modules (recommended)
 python -m agents.claims_orchestrator
 python -m agents.intake_clarifier
