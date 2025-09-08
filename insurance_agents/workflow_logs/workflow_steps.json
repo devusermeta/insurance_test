@@ -1211,5 +1211,106 @@
       },
       "duration_ms": null
     }
+  ],
+  "CLAIM_20250908_144343": [
+    {
+      "step_id": "step_01",
+      "claim_id": "CLAIM_20250908_144343",
+      "step_type": "discovery",
+      "title": "🔍 Agent Discovery",
+      "description": "Discovering available agents for claim processing",
+      "status": "in_progress",
+      "timestamp": "2025-09-08T14:43:43.631184",
+      "agent_name": null,
+      "agent_reasoning": null,
+      "details": {
+        "agents_found": 3,
+        "agent_details": [
+          {
+            "agent_id": "intake_clarifier",
+            "name": "IntakeClarifierAgent",
+            "skills": 2
+          },
+          {
+            "agent_id": "document_intelligence",
+            "name": "Document Intelligence Agent",
+            "skills": 4
+          },
+          {
+            "agent_id": "coverage_rules_engine",
+            "name": "Coverage Rules Engine Agent",
+            "skills": 4
+          }
+        ]
+      },
+      "duration_ms": null
+    },
+    {
+      "step_id": "step_02",
+      "claim_id": "CLAIM_20250908_144343",
+      "step_type": "agent_selection",
+      "title": "🎯 Agent Selection - Intake_Clarification",
+      "description": "Selected IntakeClarifierAgent for intake_clarification",
+      "status": "completed",
+      "timestamp": "2025-09-08T14:43:51.889095",
+      "agent_name": "intake_clarifier",
+      "agent_reasoning": "Best match for claim validation - IntakeClarifierAgent",
+      "details": {
+        "task_type": "intake_clarification",
+        "selected_agent": "intake_clarifier",
+        "alternatives_considered": []
+      },
+      "duration_ms": null
+    },
+    {
+      "step_id": "step_03",
+      "claim_id": "CLAIM_20250908_144343",
+      "step_type": "task_dispatch",
+      "title": "📤 Task Dispatch",
+      "description": "Sending task to IntakeClarifierAgent",
+      "status": "in_progress",
+      "timestamp": "2025-09-08T14:43:55.329390",
+      "agent_name": "IntakeClarifierAgent",
+      "agent_reasoning": null,
+      "details": {
+        "task_description": "Process claim CLAIM_20250908_144343 for initial validation",
+        "agent_url": "http://localhost:8002"
+      },
+      "duration_ms": null
+    },
+    {
+      "step_id": "step_04",
+      "claim_id": "CLAIM_20250908_144343",
+      "step_type": "agent_response",
+      "title": "📥 Agent Response - IntakeClarifierAgent",
+      "description": "Validation completed successfully",
+      "status": "completed",
+      "timestamp": "2025-09-08T14:43:58.726084",
+      "agent_name": "IntakeClarifierAgent",
+      "agent_reasoning": null,
+      "details": {
+        "status": "success",
+        "agent": "intake_clarifier",
+        "response": "{\"id\":\"task-intake_clarifier-144358\",\"jsonrpc\":\"2.0\",\"result\":{\"artifacts\":[{\"artifactId\":\"136f53ea-d393-4038-8702-b3a3fa4aee3c\",\"description\":\"Result of intake clarification process.\",\"name\":\"intake_clarification_result\",\"parts\":[{\"kind\":\"text\",\"text\":\"{\\n  \\\"status\\\": \\\"success\\\",\\n  \\\"message\\\": \\\"Processed task: general_clarification\\\",\\n  \\\"task\\\": \\\"general_clarification\\\",\\n  \\\"parameters\\\": {\\n    \\\"user_request\\\": \\\"{\\\\\\\"action\\\\\\\": \\\\\\\"process_claim\\\\\\\", \\\\\\\"claim_id\\\\\\\": \\\\\\\"CLAIM_20250908_144343\\\\\\\", \\\\\\\"claim_data\\\\\\\": {}}\\\",\\n    \\\"expected_output\\\": \\\"clarification_response\\\"\\n  },\\n  \\\"agent\\\": \\\"intake_clarifier\\\",\\n  \\\"specialties\\\": [\\n    \\\"Claims validation and clarification\\\",\\n    \\\"Fraud risk assessment\\\",\\n    \\\"Customer information verification\\\",\\n    \\\"Document completeness checking\\\"\\n  ]\\n}\"}]}],\"contextId\":\"d383f89b-d2c1-46e6-b5df-3cb438f71c6c\",\"history\":[{\"contextId\":\"d383f89b-d2c1-46e6-b5df-3cb438f71c6c\",\"kind\":\"message\",\"messageId\":\"msg-intake_clarifier-144358\",\"parts\":[{\"kind\":\"text\",\"text\":\"{\\\"action\\\": \\\"process_claim\\\", \\\"claim_id\\\": \\\"CLAIM_20250908_144343\\\", \\\"claim_data\\\": {}}\"}],\"role\":\"user\",\"taskId\":\"2afe43eb-12b5-49f5-b6e4-a161837ed834\"},{\"contextId\":\"d383f89b-d2c1-46e6-b5df-3cb438f71c6c\",\"kind\":\"message\",\"messageId\":\"526f6a9a-2556-4b32-8fdf-42872b54f7b2\",\"parts\":[{\"kind\":\"text\",\"text\":\"🏥 Starting claim intake clarification...\"}],\"role\":\"agent\",\"taskId\":\"2afe43eb-12b5-49f5-b6e4-a161837ed834\"}],\"id\":\"2afe43eb-12b5-49f5-b6e4-a161837ed834\",\"kind\":\"task\",\"status\":{\"state\":\"completed\"}}}",
+        "response_code": 200
+      },
+      "duration_ms": null
+    },
+    {
+      "step_id": "step_05",
+      "claim_id": "CLAIM_20250908_144343",
+      "step_type": "completion",
+      "title": "🎉 Processing Complete",
+      "description": "Claim CLAIM_20250908_144343 processed successfully",
+      "status": "completed",
+      "timestamp": "2025-09-08T14:44:04.658163",
+      "agent_name": null,
+      "agent_reasoning": null,
+      "details": {
+        "final_status": "Claim processed with decision: approved",
+        "total_processing_time_ms": 5000
+      },
+      "duration_ms": null
+    }
   ]
 }

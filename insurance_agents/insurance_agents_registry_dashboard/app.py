@@ -20,7 +20,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 import aiohttp
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -296,11 +296,11 @@ async def refresh_agent_status_periodically():
             await asyncio.sleep(10)  # Wait 10 seconds on error
 
 async def load_sample_claims():
-    """Load REAL claims from Cosmos DB via MCP server"""
+    """Load REAL claims from Cosmos DB via MCP server - NEW DATABASE STRUCTURE"""
     try:
-        terminal_logger.log("COSMOS", "LOADING", "Loading real claims from Cosmos DB...")
+        terminal_logger.log("COSMOS", "LOADING", "Loading real patient data from insurance.patient_details...")
         
-        # Call MCP server to get real claims
+        # Call MCP server to get real patient data from new database structure
         import uuid
         mcp_payload = {
             "jsonrpc": "2.0",
@@ -309,7 +309,7 @@ async def load_sample_claims():
             "params": {
                 "name": "query_cosmos",
                 "arguments": {
-                    "collection": "claims",
+                    "collection": "patient_details",  # New container name
                     "query": "SELECT * FROM c",
                     "max_items": 50
                 }
@@ -326,43 +326,47 @@ async def load_sample_claims():
                 
                 if response.status == 200:
                     data = await response.json()
-                    terminal_logger.log("COSMOS", "SUCCESS", "Successfully retrieved real claims from Cosmos")
+                    terminal_logger.log("COSMOS", "SUCCESS", "Successfully retrieved real patient data from Cosmos")
                     
-                    # Parse real Cosmos data
+                    # Parse real patient data from new structure
                     if "result" in data and "content" in data["result"]:
                         items = data["result"]["content"]
                         if isinstance(items, list):
                             for item in items:
-                                # Create ClaimStatus from real Cosmos data
+                                # Create ClaimStatus from real Cosmos patient data - no more fallback needed!
                                 claim = ClaimStatus(
                                     claimId=item.get("claimId", "Unknown"),
                                     status=item.get("status", "submitted"),
                                     category=item.get("category", "Unknown"),
                                     amountBilled=float(item.get("amountBilled", 0)),
                                     submitDate=item.get("submitDate", ""),
-                                    lastUpdate=datetime.now().isoformat(),
-                                    assignedEmployee=None,
-                                    # Fix undefined values with proper field mapping
-                                    patientName=item.get("memberId", f"Patient-{item.get('claimId', 'Unknown')}"),
+                                    lastUpdate=item.get("lastUpdate", datetime.now().isoformat()),
+                                    assignedEmployee=item.get("assignedEmployee"),
+                                    # Real patient data - no more undefined values!
+                                    patientName=item.get("patientName", "Unknown Patient"),
                                     provider=item.get("provider", "Unknown Provider"),
                                     memberId=item.get("memberId", "Unknown"),
                                     region=item.get("region", "US")
                                 )
                                 active_claims[claim.claimId] = claim
-                                terminal_logger.log("COSMOS", "LOAD", f"Loaded REAL claim: {claim.claimId} - ${claim.amountBilled} ({item.get('provider', 'N/A')})")
+                                terminal_logger.log("COSMOS", "LOAD", f"Loaded REAL patient: {claim.patientName} - {claim.claimId} - ${claim.amountBilled} ({item.get('provider', 'N/A')})")
                             
-                            terminal_logger.log("SUCCESS", "COSMOS", f"Loaded {len(items)} real claims from Cosmos DB")
+                            terminal_logger.log("SUCCESS", "COSMOS", f"Loaded {len(items)} real patient records from insurance.patient_details")
                             return
                     
-                    terminal_logger.log("WARNING", "COSMOS", "No claims found in Cosmos response")
+                    terminal_logger.log("WARNING", "COSMOS", "No patient data found in Cosmos response")
                 
                 else:
                     terminal_logger.log("ERROR", "COSMOS", f"MCP server returned {response.status}")
     
     except Exception as e:
-        terminal_logger.log("ERROR", "COSMOS", f"Failed to load real claims: {str(e)}")
-    
-    # Fallback to sample data if Cosmos fails
+        terminal_logger.log("ERROR", "COSMOS", f"Failed to load real patient data: {str(e)}")
+        terminal_logger.log("ERROR", "COSMOS", "Make sure:")
+        terminal_logger.log("ERROR", "COSMOS", "1. Cosmos DB is configured with 'insurance' database")
+        terminal_logger.log("ERROR", "COSMOS", "2. 'patient_details' container exists with data")
+        terminal_logger.log("ERROR", "COSMOS", "3. MCP server is running on port 8080")
+        terminal_logger.log("ERROR", "COSMOS", "4. Run: python setup_cosmos_db.py to populate database")
+        # Fallback to sample data if Cosmos fails
     terminal_logger.log("WARNING", "FALLBACK", "Using fallback sample claims")
     sample_claims = [
         {
@@ -410,6 +414,11 @@ async def load_sample_claims():
         claim = ClaimStatus(**claim_data)
         active_claims[claim.claimId] = claim
         terminal_logger.log("CLAIM", "LOAD", f"Loaded claim: {claim.claimId} - ${claim.amountBilled}")
+
+    # If we get here, Cosmos DB setup is needed - no more fallback sample data!
+    terminal_logger.log("SETUP", "REQUIRED", "🔧 Cosmos DB setup required!")
+    terminal_logger.log("SETUP", "REQUIRED", "Run: python setup_cosmos_db.py")
+    terminal_logger.log("SETUP", "REQUIRED", "Then start MCP server and restart dashboard")
 
 # API Endpoints
 
