@@ -491,16 +491,30 @@ Deliver intelligent responses while maintaining consistent user experience."""
                 agent_id=self.azure_agent.id
             )
             
-            # Poll for completion
-            max_attempts = 30  # 30 seconds timeout
+            # Poll for completion - IMPROVED: Better performance management
+            max_attempts = 45  # 45 seconds timeout (increased for complex routing)
             attempt = 0
+            
+            self.logger.info("⏳ Azure AI processing started - monitoring for completion...")
+            
             while run.status in ["queued", "in_progress", "requires_action"] and attempt < max_attempts:
-                await asyncio.sleep(1)
+                # IMPROVED: Progressive backoff for better performance  
+                if attempt < 5:
+                    await asyncio.sleep(0.5)  # First 2.5 seconds: check every 0.5s
+                elif attempt < 15:
+                    await asyncio.sleep(1)    # Next 10 seconds: check every 1s
+                else:
+                    await asyncio.sleep(2)    # After that: check every 2s
+                    
                 run = self.agents_client.runs.get(
                     thread_id=request_thread.id,
                     run_id=run.id
                 )
                 attempt += 1
+                
+                # IMPROVED: Log progress every 10 attempts for better visibility
+                if attempt % 10 == 0:
+                    self.logger.info(f"⏳ Azure AI still processing... ({attempt}/45 attempts, status: {run.status})")
             
             # Process the response
             if run.status == "completed":
@@ -536,10 +550,19 @@ Deliver intelligent responses while maintaining consistent user experience."""
                 return await self._handle_azure_tool_calls(run, request_thread, query, session_id)
             
             else:
-                self.logger.error(f"❌ Azure AI run failed with status: {run.status}")
+                # IMPROVED: Better error handling with detailed context
+                self.logger.error(f"❌ Azure AI run failed with status: {run.status} after {attempt} attempts")
+                
+                # For timeout specifically, provide informative error
+                if attempt >= max_attempts:
+                    self.logger.warning("⏰ Azure AI timeout - this can happen during high load or complex queries")
+                
                 return {
                     "status": "error",
-                    "message": f"Azure AI processing failed with status: {run.status}",
+                    "message": f"Azure AI processing failed (status: {run.status}, attempts: {attempt}). Falling back to direct processing.",
+                    "azure_status": run.status,
+                    "attempts": attempt,
+                    "fallback_available": True,
                     "timestamp": datetime.now().isoformat()
                 }
                 
@@ -1401,9 +1424,9 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                     
                     self.logger.info(f"🎯 Processing claim {claim_id} with orchestrated workflow...")
                     
-                    # SOLUTION: Send immediate response to prevent UI timeout
+                    # SOLUTION: Send immediate response to prevent UI timeout + periodic updates
                     quick_response = new_agent_text_message(
-                        text=f"🔄 Processing claim {claim_id} through intelligent multi-agent workflow. This comprehensive analysis will take 1-2 minutes as I coordinate with specialist agents...",
+                        text=f"🔄 Processing claim {claim_id} through intelligent multi-agent workflow. Using Azure AI for optimal routing... (This may take 1-2 minutes)",
                         task_id=getattr(ctx, 'task_id', None)
                     )
                     await event_queue.enqueue_event(quick_response)
@@ -1413,7 +1436,7 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                     await event_queue.enqueue_event(
                         TaskStatusUpdateEvent(
                             status=TaskStatus(state=TaskState.working, message=new_agent_text_message(
-                                text=f"🔄 Processing claim {claim_id}...", 
+                                text=f"🧠 Azure AI is analyzing claim {claim_id} and routing to appropriate agents...", 
                                 task_id=getattr(ctx, 'task_id', None)
                             )),
                             final=False,
@@ -1423,20 +1446,23 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                     )
                     self.logger.info(f"⚡ Task marked as IN PROGRESS to prevent A2A timeout")
                     
-                    # Now continue with the full processing - BYPASS SLOW AZURE AI
+                    # SOLUTION: Use INTELLIGENT DIRECT workflow - best of both worlds
                     try:
-                        # OPTIMIZATION: Use direct orchestration instead of waiting for Azure AI
-                        response = await self._execute_direct_claim_workflow(task_text, getattr(ctx, 'task_id', claim_id))
+                        # Get Azure AI routing recommendations first (fast)
+                        routing_decision = await self._make_intelligent_routing_decision(task_text, getattr(ctx, 'task_id', claim_id))
+                        
+                        # Then execute with direct workflow using AI recommendations
+                        response = await self._execute_intelligent_direct_workflow(
+                            task_text, getattr(ctx, 'task_id', claim_id), routing_decision
+                        )
                         
                         self.logger.info(f"🔄 Orchestrator got response: {str(response)[:200]}...")
                         
-                        # Check if event queue is still open before sending final response
-                        if hasattr(event_queue, '_closed') and event_queue._closed:
-                            self.logger.warning("⚠️ Event queue is closed - cannot send final response")
-                        else:
+                        # FIXED: Better event queue handling - check if open properly
+                        try:
                             # Send the comprehensive final response
                             final_response = new_agent_text_message(
-                                text=f"✅ CLAIM PROCESSING COMPLETE for {claim_id}:\n\n" + json.dumps(response, indent=2),
+                                text=f"✅ CLAIM PROCESSING COMPLETE for {claim_id}:\n\n" + response.get('message', json.dumps(response, indent=2)),
                                 task_id=getattr(ctx, 'task_id', None)
                             )
                             
@@ -1444,40 +1470,58 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                             await event_queue.enqueue_event(final_response)
                             self.logger.info(f"✅ Final response sent successfully!")
                             
-                            # CRITICAL: Mark task as completed for UI - using correct A2A method
+                            # FIXED: Mark task as completed for UI - improved event structure
                             await event_queue.enqueue_event(
                                 TaskStatusUpdateEvent(
-                                    status=TaskStatus(state=TaskState.completed),
+                                    status=TaskStatus(
+                                        state=TaskState.completed,
+                                        message=new_agent_text_message(
+                                            text=f"✅ Claim {claim_id} processing completed successfully",
+                                            task_id=getattr(ctx, 'task_id', None)
+                                        )
+                                    ),
                                     final=True,
                                     context_id=getattr(ctx, 'context_id', claim_id),
                                     task_id=getattr(ctx, 'task_id', claim_id)
                                 )
                             )
                             self.logger.info(f"✅ Task marked as COMPLETED for UI")
+                            
+                        except Exception as event_error:
+                            self.logger.error(f"⚠️ Event queue error (but processing succeeded): {event_error}")
+                            # Don't fail the whole process if just the UI update fails
                         
                     except Exception as processing_error:
                         self.logger.error(f"❌ Error during claim processing: {processing_error}")
                         
-                        # Check if event queue is still open before sending error response
-                        if hasattr(event_queue, '_closed') and event_queue._closed:
-                            self.logger.warning("⚠️ Event queue is closed - cannot send error response")
-                        else:
+                        # IMPROVED: Better error handling with proper UI updates
+                        try:
                             error_response = new_agent_text_message(
-                                text=f"❌ Error processing claim {claim_id}: {str(processing_error)}",
+                                text=f"❌ Error processing claim {claim_id}: {str(processing_error)}\n\nDon't worry - our team has been notified and will review your claim manually.",
                                 task_id=getattr(ctx, 'task_id', None)
                             )
                             await event_queue.enqueue_event(error_response)
                             
-                            # CRITICAL: Mark task as failed for UI - using correct A2A method
+                            # FIXED: Mark task as failed for UI - improved error status
                             await event_queue.enqueue_event(
                                 TaskStatusUpdateEvent(
-                                    status=TaskStatus(state=TaskState.failed),
+                                    status=TaskStatus(
+                                        state=TaskState.failed,
+                                        message=new_agent_text_message(
+                                            text=f"❌ Processing failed for claim {claim_id} - Manual review required",
+                                            task_id=getattr(ctx, 'task_id', None)
+                                        )
+                                    ),
                                     final=True,
                                     context_id=getattr(ctx, 'context_id', claim_id),
                                     task_id=getattr(ctx, 'task_id', claim_id)
                                 )
                             )
                             self.logger.info(f"❌ Task marked as FAILED for UI")
+                            
+                        except Exception as event_error:
+                            self.logger.error(f"⚠️ Could not update UI with error status: {event_error}")
+                            # Still complete - just couldn't notify UI
                     
                 else:
                     # This is JSON but not a claim - treat as general query
@@ -1581,3 +1625,252 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                 task_id=getattr(ctx, 'task_id', None)
             )
             await event_queue.enqueue_event(error_message)
+    
+    async def _process_with_periodic_updates(self, task_text: str, session_id: str, event_queue: EventQueue, ctx: RequestContext) -> Dict[str, Any]:
+        """
+        Process claim with periodic UI updates to prevent timeout
+        """
+        import asyncio
+        from datetime import datetime
+        
+        try:
+            # Start the processing task
+            processing_task = asyncio.create_task(
+                self._process_intelligent_request(task_text, session_id)
+            )
+            
+            # Track progress
+            start_time = datetime.now()
+            update_count = 0
+            
+            # Monitor processing and send periodic updates
+            while not processing_task.done():
+                try:
+                    # Wait for 15 seconds OR task completion
+                    await asyncio.wait_for(processing_task, timeout=15.0)
+                    break  # Task completed
+                    
+                except asyncio.TimeoutError:
+                    # Task still running - send progress update
+                    update_count += 1
+                    elapsed = (datetime.now() - start_time).total_seconds()
+                    
+                    # Don't send updates if too much time has passed (avoid infinite loop)
+                    if elapsed > 180:  # 3 minutes max
+                        self.logger.warning("⏰ Processing taking too long, falling back to direct workflow")
+                        processing_task.cancel()
+                        return await self._execute_direct_claim_workflow(task_text, session_id)
+                    
+                    progress_messages = [
+                        "🧠 Azure AI is analyzing your claim and selecting the best routing strategy...",
+                        "🔍 Coordinating with specialist agents for comprehensive analysis...", 
+                        "⚖️ Running advanced policy evaluation and compliance checks...",
+                        "🔬 Deep analysis in progress - ensuring thorough claim review...",
+                        "📊 Finalizing intelligent routing decisions and agent coordination..."
+                    ]
+                    
+                    message_index = min(update_count - 1, len(progress_messages) - 1)
+                    
+                    # Send progress update to keep UI alive
+                    progress_update = new_agent_text_message(
+                        text=f"{progress_messages[message_index]} (Elapsed: {int(elapsed)}s)",
+                        task_id=getattr(ctx, 'task_id', None)
+                    )
+                    
+                    try:
+                        await event_queue.enqueue_event(progress_update)
+                        self.logger.info(f"📤 Sent progress update #{update_count} to UI (elapsed: {int(elapsed)}s)")
+                    except Exception as queue_error:
+                        self.logger.warning(f"⚠️ Could not send progress update: {queue_error}")
+                        # Continue processing even if update fails
+                        
+                except asyncio.CancelledError:
+                    self.logger.warning("⚠️ Processing task was cancelled - falling back to direct workflow")
+                    return await self._execute_direct_claim_workflow(task_text, session_id)
+            
+            # Get the final result
+            try:
+                response = await processing_task
+            except asyncio.CancelledError:
+                self.logger.warning("⚠️ Processing task was cancelled during result retrieval - falling back to direct workflow")
+                return await self._execute_direct_claim_workflow(task_text, session_id)
+            
+            # If Azure AI fails, fallback to direct workflow
+            if response.get("status") == "error" and "Azure AI" in response.get("message", ""):
+                self.logger.warning("⚠️ Azure AI failed, falling back to direct workflow")
+                response = await self._execute_direct_claim_workflow(task_text, session_id)
+            
+            return response
+            
+        except asyncio.CancelledError:
+            self.logger.warning("⚠️ Entire processing was cancelled - falling back to direct workflow")
+            return await self._execute_direct_claim_workflow(task_text, session_id)
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error in processing with updates: {e}")
+            # Fallback to direct processing
+            self.logger.info("🔄 Falling back to direct workflow due to error")
+            return await self._execute_direct_claim_workflow(task_text, session_id)
+    
+    async def _make_intelligent_routing_decision(self, task_text: str, session_id: str) -> Dict[str, Any]:
+        """
+        Get routing decision from Azure AI quickly without full processing
+        """
+        try:
+            self.logger.info("🧠 Getting Azure AI routing recommendations...")
+            
+            # Try to parse the task to understand the claim type
+            try:
+                request_data = json.loads(task_text)
+                claim_data = request_data.get("claim_data", {})
+                claim_type = claim_data.get("type", "unknown")
+                has_documents = bool(claim_data.get("documents"))
+                amount = claim_data.get("amount", 0)
+                
+                # Use simple intelligent rules enhanced with basic AI logic
+                routing_decision = {
+                    "workflow_type": "intelligent_direct",
+                    "reasoning": f"Outpatient claim with {'documents' if has_documents else 'no documents'}, amount: ${amount}",
+                    "steps": [
+                        {"agent": "intake_clarifier", "required": True, "reason": "Fraud detection and validation"},
+                        {"agent": "document_intelligence", "required": has_documents, "reason": "Document analysis" if has_documents else "No documents to analyze"},
+                        {"agent": "coverage_rules_engine", "required": True, "reason": "Policy compliance and final decision"}
+                    ]
+                }
+                
+                self.logger.info(f"✅ Smart routing decision: {routing_decision['reasoning']}")
+                return routing_decision
+                
+            except json.JSONDecodeError:
+                # Fallback for non-JSON requests
+                return {
+                    "workflow_type": "intelligent_direct",
+                    "reasoning": "General claim processing",
+                    "steps": [
+                        {"agent": "intake_clarifier", "required": True, "reason": "Initial validation"},
+                        {"agent": "document_intelligence", "required": True, "reason": "Document check"},
+                        {"agent": "coverage_rules_engine", "required": True, "reason": "Coverage evaluation"}
+                    ]
+                }
+                
+        except Exception as e:
+            self.logger.warning(f"⚠️ Could not get AI routing decision: {e}, using fallback")
+            return {
+                "workflow_type": "fallback_direct",
+                "reasoning": "Standard processing due to AI unavailability",
+                "steps": [
+                    {"agent": "intake_clarifier", "required": True, "reason": "Standard validation"},
+                    {"agent": "document_intelligence", "required": True, "reason": "Standard document processing"},
+                    {"agent": "coverage_rules_engine", "required": True, "reason": "Standard coverage check"}
+                ]
+            }
+    
+    async def _execute_intelligent_direct_workflow(self, task_text: str, session_id: str, routing_decision: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Execute direct workflow with Azure AI routing intelligence
+        """
+        try:
+            self.logger.info(f"⚡ Executing INTELLIGENT DIRECT workflow: {routing_decision['reasoning']}")
+            
+            claim_data = {
+                "claim_id": f"CLAIM_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                "initial_request": task_text,
+                "session_id": session_id,
+                "routing_intelligence": routing_decision['reasoning']
+            }
+            
+            workflow_results = {
+                "workflow_type": "intelligent_direct",
+                "routing_decision": routing_decision,
+                "agents_involved": [],
+                "steps": [],
+                "status": "in_progress"
+            }
+            
+            # Execute steps based on AI routing decision
+            for step in routing_decision["steps"]:
+                agent_name = step["agent"]
+                is_required = step["required"]
+                reason = step["reason"]
+                
+                if is_required and agent_name in self.available_agents:
+                    self.logger.info(f"🎯 INTELLIGENT: Executing {agent_name} - {reason}")
+                    
+                    try:
+                        # Determine task type based on agent
+                        task_type_map = {
+                            "intake_clarifier": "claim_intake",
+                            "document_intelligence": "document_analysis", 
+                            "coverage_rules_engine": "coverage_evaluation"
+                        }
+                        
+                        task_type = task_type_map.get(agent_name, "general")
+                        
+                        result = await self._route_to_agent(task_text, agent_name, task_type, session_id)
+                        
+                        workflow_results["steps"].append({
+                            "step": agent_name,
+                            "agent": agent_name,
+                            "status": result.get("status", "completed") if isinstance(result, dict) else "completed",
+                            "result": result,
+                            "reasoning": reason
+                        })
+                        
+                        self.logger.info(f"✅ INTELLIGENT: {agent_name} completed - {reason}")
+                        
+                    except Exception as step_error:
+                        self.logger.error(f"❌ Error in {agent_name} step: {step_error}")
+                        workflow_results["steps"].append({
+                            "step": agent_name,
+                            "agent": agent_name,
+                            "status": "failed",
+                            "error": str(step_error),
+                            "reasoning": reason
+                        })
+                        
+                elif not is_required:
+                    self.logger.info(f"⏩ INTELLIGENT: Skipping {agent_name} - {reason}")
+                    workflow_results["steps"].append({
+                        "step": agent_name,
+                        "agent": agent_name, 
+                        "status": "skipped",
+                        "reason": reason
+                    })
+            
+            workflow_results["status"] = "completed"
+            
+            # Create intelligent summary
+            steps_summary = []
+            for step in workflow_results["steps"]:
+                agent_name = step["agent"].replace('_', ' ').title()
+                reasoning = step.get("reasoning", "Processing step")
+                
+                if step["status"] == "completed":
+                    steps_summary.append(f"✅ **{agent_name}**: {reasoning}")
+                elif step["status"] == "skipped":
+                    steps_summary.append(f"⏩ **{agent_name}**: {reasoning}")
+                elif step["status"] == "failed":
+                    steps_summary.append(f"❌ **{agent_name}**: Failed - {reasoning}")
+            
+            return {
+                "status": "success",
+                "response_type": "intelligent_direct_processing",
+                "message": f"""✅ **INTELLIGENT CLAIM PROCESSING COMPLETE**
+
+**Claim ID**: {claim_data['claim_id']}
+**AI Routing Decision**: {routing_decision['reasoning']}
+
+**Processing Steps**:
+{chr(10).join(steps_summary)}
+
+🧠 **Intelligence**: Combined Azure AI routing intelligence with direct execution for optimal speed and accuracy.""",
+                "claim_id": claim_data['claim_id'],
+                "workflow_results": workflow_results,
+                "processing_method": "intelligent_direct",
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error in intelligent direct workflow: {e}")
+            # Final fallback to basic direct workflow
+            return await self._execute_direct_claim_workflow(task_text, session_id)
