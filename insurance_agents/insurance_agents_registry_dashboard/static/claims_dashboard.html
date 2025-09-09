@@ -1103,25 +1103,24 @@
             const claimGroups = Object.entries(stepsByClaim)
                 .map(([claimId, claimSteps]) => ({
                     claimId,
-                    steps: claimSteps.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)),
+                    // Sort steps in CHRONOLOGICAL ORDER (oldest first)
+                    steps: claimSteps.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)),
                     latestTimestamp: new Date(Math.max(...claimSteps.map(s => new Date(s.timestamp))))
                 }))
                 .sort((a, b) => b.latestTimestamp - a.latestTimestamp)
                 .slice(0, 2);
             
-            // Create the same HTML structure as processing steps
+            // Create clean HTML structure without icon names
             const historyHtml = claimGroups.map(group => {
                 const claimStepsHtml = group.steps.map((step, index) => `
-                    <div class="step-item">
-                        <div class="step-icon">
-                            ${getStepIcon(step.step_type || 'workflow')}
+                    <div class="activity-item">
+                        <div class="activity-icon activity-${getStepStatusClass(step.step_type)}">
+                            <i class="fas fa-${getStepIconName(step.step_type || 'workflow')}"></i>
                         </div>
-                        <div class="step-content">
-                            <div class="step-title">
-                                <strong>Step ${index + 1}: ${step.title || step.step_name || 'Processing Step'}</strong>
-                                <span class="step-time">${formatTimeAgo(step.timestamp)}</span>
-                            </div>
-                            <div class="step-description">${step.description || 'No description available'}</div>
+                        <div class="activity-time">${formatTime(step.timestamp)}</div>
+                        <div class="activity-message">
+                            <strong>Step ${index + 1}: ${step.title || step.step_name || 'Processing Step'}</strong>
+                            <br><span>${step.description || 'No description available'}</span>
                         </div>
                     </div>
                 `).join('');
@@ -1344,16 +1343,18 @@
                 return;
             }
             
-            container.innerHTML = steps.map(step => `
+            // Sort steps in chronological order (oldest first for proper step sequence)
+            const sortedSteps = steps.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            
+            container.innerHTML = sortedSteps.map(step => `
                 <div class="activity-item">
                     <div class="activity-icon activity-${step.statusClass || getStepStatusClass(step.status)}">
-                        <i class="fas fa-${step.statusIcon || getStepIcon(step.step_type)}"></i>
+                        <i class="fas fa-${getStepIconName(step.step_type)}"></i>
                     </div>
                     <div class="activity-time">${formatTime(step.timestamp)}</div>
                     <div class="activity-message">
                         <strong>${step.title || step.step_type.replace('_', ' ').toUpperCase()}:</strong> ${step.description}
                         ${step.agent_name ? `<br><small>🤖 Agent: ${step.agent_name}</small>` : ''}
-                        ${step.details ? `<br><small>📋 ${step.details}</small>` : ''}
                         ${step.claim_id ? `<br><small>🔍 Claim: ${step.claim_id}</small>` : ''}
                         ${step.status === 'skipped' ? `<br><small>⚡ Hybrid Intelligence: Optimized workflow</small>` : ''}
                     </div>
@@ -1361,17 +1362,27 @@
             `).join('');
         }
 
-        // Get step icon based on type
-        function getStepIcon(stepType) {
+        // Get step icon name (just the name, no HTML)
+        function getStepIconName(stepType) {
             const icons = {
                 'agent_discovery': 'search',
                 'agent_selection': 'user-check',
                 'task_dispatch': 'paper-plane',
                 'agent_response': 'reply',
                 'decision': 'brain',
-                'orchestrator_action': 'cogs'
+                'orchestrator_action': 'cogs',
+                'workflow': 'info-circle',
+                'processing_complete': 'check-circle',
+                'claim_intake': 'file-import',
+                'document_analysis': 'file-text',
+                'coverage_evaluation': 'shield-alt'
             };
             return icons[stepType] || 'info-circle';
+        }
+
+        // Get step icon based on type (legacy support)
+        function getStepIcon(stepType) {
+            return getStepIconName(stepType);
         }
 
         // Get step status class with intelligent orchestrator support
@@ -1381,7 +1392,14 @@
                 'completed': 'complete',
                 'failed': 'error',
                 'in_progress': 'process',
-                'skipped': 'skipped'
+                'skipped': 'skipped',
+                'agent_discovery': 'process',
+                'agent_selection': 'process',
+                'task_dispatch': 'process',
+                'agent_response': 'complete',
+                'decision': 'process',
+                'orchestrator_action': 'process',
+                'processing_complete': 'complete'
             };
             return classes[status] || 'process';
         }
