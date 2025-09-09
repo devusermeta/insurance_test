@@ -814,6 +814,67 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+
+        /* Toggle Button Styles */
+        .toggle-controls {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .toggle-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .toggle-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
+            background: linear-gradient(135deg, #764ba2, #667eea);
+        }
+
+        .toggle-btn.active {
+            background: linear-gradient(135deg, #11998e, #38ef7d);
+            box-shadow: 0 2px 8px rgba(17, 153, 142, 0.3);
+        }
+
+        .toggle-btn.active:hover {
+            box-shadow: 0 4px 16px rgba(17, 153, 142, 0.4);
+        }
+
+        /* Recent History Workflow Group Styles */
+        .workflow-group {
+            margin-bottom: 2rem;
+            background: linear-gradient(135deg, #f8fafc, #ffffff);
+            border-radius: 12px;
+            padding: 1.5rem;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .workflow-group-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .workflow-steps {
+            margin-top: 1rem;
+        }
     </style>
 </head>
 <body>
@@ -895,8 +956,14 @@
             <div class="section-header">
                 <h2 class="section-title">
                     <i class="fas fa-cogs"></i>
-                    Processing Steps
+                    <span id="sectionTitle">Processing Steps</span>
                 </h2>
+                <div class="toggle-controls">
+                    <button id="toggleViewBtn" class="toggle-btn active" onclick="toggleView()">
+                        <i class="fas fa-history"></i>
+                        Show Recent History
+                    </button>
+                </div>
             </div>
             
             <div class="activity-log" id="activityLog">
@@ -906,18 +973,49 @@
     </main>
 
     <script>
+        // Global state for toggle functionality
+        let isShowingRecentHistory = false;
+        
+        // Toggle between Processing Steps and Recent History
+        function toggleView() {
+            const toggleBtn = document.getElementById('toggleViewBtn');
+            const sectionTitle = document.getElementById('sectionTitle');
+            
+            isShowingRecentHistory = !isShowingRecentHistory;
+            
+            if (isShowingRecentHistory) {
+                // Switch to Recent History view
+                toggleBtn.innerHTML = '<i class="fas fa-cogs"></i> Show Processing Steps';
+                sectionTitle.textContent = 'Recent History';
+                loadRecentHistory();
+                toggleBtn.classList.remove('active');
+            } else {
+                // Switch back to Processing Steps view
+                toggleBtn.innerHTML = '<i class="fas fa-history"></i> Show Recent History';
+                sectionTitle.textContent = 'Processing Steps';
+                loadProcessingSteps();
+                toggleBtn.classList.add('active');
+            }
+        }
+        
         // Initialize intelligent claims dashboard
         document.addEventListener('DOMContentLoaded', function() {
             console.log('🧠 Intelligent Claims Dashboard initializing...');
-            console.log('🔧 Supporting Hybrid Intelligence & Dynamic Processing Steps');
+            console.log('🔧 Supporting Hybrid Intelligence & Dynamic Processing Steps with Toggle View');
             
             loadClaims();
-            loadProcessingSteps();
+            loadProcessingSteps(); // Start with Processing Steps view
             
             // Real-time updates for intelligent orchestrator (faster refresh)
             setInterval(() => {
                 refreshClaims();
-                loadProcessingSteps();
+                
+                // Only refresh the current active view
+                if (isShowingRecentHistory) {
+                    loadRecentHistory();
+                } else {
+                    loadProcessingSteps();
+                }
             }, 5000); // Update every 5 seconds for better real-time experience
             
             console.log('✅ Intelligent Claims Dashboard ready!');
@@ -943,6 +1041,107 @@
                 console.error('API call failed:', error);
                 throw error;
             }
+        }
+
+        // Format time ago
+        function formatTimeAgo(timestamp) {
+            if (!timestamp) return 'Unknown time';
+            
+            try {
+                const date = new Date(timestamp);
+                const now = new Date();
+                const diffInSeconds = Math.floor((now - date) / 1000);
+                
+                if (diffInSeconds < 60) return `${diffInSeconds}s ago`;
+                if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
+                if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
+                return `${Math.floor(diffInSeconds / 86400)}d ago`;
+            } catch (error) {
+                return 'Unknown time';
+            }
+        }
+
+        // Load recent history for the toggle view (last 2 workflows)
+        function loadRecentHistory() {
+            fetch('/api/recent-workflow-steps')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success' && data.steps && data.steps.length > 0) {
+                        displayRecentHistoryInProcessingContainer(data.steps);
+                    } else {
+                        document.getElementById('activityLog').innerHTML = 
+                            '<p style="text-align: center; color: #666; padding: 1rem;">No recent history available.</p>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading recent history:', error);
+                    document.getElementById('activityLog').innerHTML = 
+                        '<p style="text-align: center; color: #666; padding: 1rem;">Failed to load recent history.</p>';
+                });
+        }
+
+        // Display recent history in the same container as processing steps
+        function displayRecentHistoryInProcessingContainer(steps) {
+            const container = document.getElementById('activityLog');
+            
+            if (steps.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666; padding: 1rem;">No recent workflow history found.</p>';
+                return;
+            }
+            
+            // Group steps by claim_id to show last 2 workflows
+            const stepsByClaim = {};
+            steps.forEach(step => {
+                const claimId = step.claim_id || 'unknown';
+                if (!stepsByClaim[claimId]) {
+                    stepsByClaim[claimId] = [];
+                }
+                stepsByClaim[claimId].push(step);
+            });
+            
+            // Get the 2 most recent claims (by latest timestamp in each group)
+            const claimGroups = Object.entries(stepsByClaim)
+                .map(([claimId, claimSteps]) => ({
+                    claimId,
+                    steps: claimSteps.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)),
+                    latestTimestamp: new Date(Math.max(...claimSteps.map(s => new Date(s.timestamp))))
+                }))
+                .sort((a, b) => b.latestTimestamp - a.latestTimestamp)
+                .slice(0, 2);
+            
+            // Create the same HTML structure as processing steps
+            const historyHtml = claimGroups.map(group => {
+                const claimStepsHtml = group.steps.map((step, index) => `
+                    <div class="step-item">
+                        <div class="step-icon">
+                            ${getStepIcon(step.step_type || 'workflow')}
+                        </div>
+                        <div class="step-content">
+                            <div class="step-title">
+                                <strong>Step ${index + 1}: ${step.title || step.step_name || 'Processing Step'}</strong>
+                                <span class="step-time">${formatTimeAgo(step.timestamp)}</span>
+                            </div>
+                            <div class="step-description">${step.description || 'No description available'}</div>
+                        </div>
+                    </div>
+                `).join('');
+                
+                return `
+                    <div class="workflow-group">
+                        <div class="workflow-group-header">
+                            <h3 style="margin: 0; color: #2d3748; background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 8px 12px; border-radius: 8px; display: inline-block;">
+                                <i class="fas fa-file-medical"></i> Claim ${group.claimId}
+                            </h3>
+                            <span style="color: #718096; font-size: 0.9rem;">${group.steps.length} steps completed</span>
+                        </div>
+                        <div class="workflow-steps">
+                            ${claimStepsHtml}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            container.innerHTML = historyHtml;
         }
 
         // Load claims data

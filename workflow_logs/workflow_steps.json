@@ -647,7 +647,7 @@
       "title": "🎯 Agent Selection - Intelligent_Routing",
       "description": "Selected Azure AI GPT-4o for intelligent_routing",
       "status": "in_progress",
-      "timestamp": "2025-09-09T15:30:33.341586",
+      "timestamp": "2025-09-09T16:25:31.008722",
       "agent_name": "azure_ai_foundry",
       "agent_reasoning": "Outpatient claim with documents, amount: $180.0",
       "details": {
@@ -664,7 +664,7 @@
       "title": "📤 Task Dispatch",
       "description": "Sending task to intake_clarifier",
       "status": "in_progress",
-      "timestamp": "2025-09-09T15:30:34.781963",
+      "timestamp": "2025-09-09T16:25:32.398824",
       "agent_name": "intake_clarifier",
       "agent_reasoning": null,
       "details": {
@@ -680,18 +680,18 @@
       "title": "📥 Agent Response - intake_clarifier",
       "description": "Successfully completed claim_intake",
       "status": "completed",
-      "timestamp": "2025-09-09T15:30:36.285440",
+      "timestamp": "2025-09-09T16:25:33.839469",
       "agent_name": "intake_clarifier",
       "agent_reasoning": null,
       "details": {
         "result": {
           "status": "success",
           "response_type": "agent_response",
-          "message": "I consulted our intake_clarifier specialist and here's what they found:\n\n{'id': 'a2a-intake_clarifier-b700159c-dd97-4094-82fd-72f6fa0d25b9', 'jsonrpc': '2.0', 'result': {'artifacts': [{'artifactId': 'ee512c80-21b5-4afa-a10d-94467ce6e47a', 'description': 'Result of intake clarification process.', 'name': 'intake_clarification_result', 'parts': [{'kind': 'text', 'text': '{\\n  \"status\": \"success\",\\n  \"claim_id\": \"OP-1001\",\\n  \"clarification_result\": {\\n    \"claim_id\": \"OP-1001\",\\n    \"validation_status\": \"requires_clarification\",\\n    \"completeness_score\": 40,\\n    \"fraud_risk_score\": 10,\\n    \"issues\": [\\n      \"customer_id\",\\n      \"description\",\\n      \"insufficient_description\"\\n    ],\\n    \"questions\": [\\n      \"Please provide customer id\",\\n      \"Please provide description\",\\n      \"Can you provide more detailed description?\"\\n    ],\\n    \"recommendations\": [\\n      \"Address validation issues before proceeding\"\\n    ]\\n  },\\n  \"agent\": \"intake_clarifier\"\\n}'}]}], 'contextId': '08b019b2-5f67-4e3a-8984-e8959e2eb5ed', 'history': [{'contextId': '08b019b2-5f67-4e3a-8984-e8959e2eb5ed', 'kind': 'message', 'messageId': 'msg-65eef6f5-faa4-4559-89e0-29f6e66f329a', 'parts': [{'kind': 'text', 'text': 'Task: claim_intake: {\"action\": \"process_claim\", \"claim_id\": \"OP-1001\", \"claim_data\": {\"claim_id\": \"OP-1001\", \"type\": \"outpatient\", \"amount\": 180.0, \"description\": \"Insurance claim processing for OP-1001\", \"customer_id\": \"qwerty\", \"policy_number\": \"POL_OP-1001\", \"incident_date\": \"2024-01-15\", \"location\": \"Dashboard Processing\", \"documents\": [\"claim_form.pdf\", \"supporting_documents.pdf\"], \"customer_statement\": \"Processing Outpatient claim through dashboard interface\", \"patient_name\": \"John Smith\", \"provider\": \"CLN-ALPHA\", \"member_id\": \"M-001\", \"region\": \"US\"}}. Parameters: {\"action\": \"claim_intake\", \"query\": \"{\\\\\"action\\\\\": \\\\\"process_claim\\\\\", \\\\\"claim_id\\\\\": \\\\\"OP-1001\\\\\", \\\\\"claim_data\\\\\": {\\\\\"claim_id\\\\\": \\\\\"OP-1001\\\\\", \\\\\"type\\\\\": \\\\\"outpatient\\\\\", \\\\\"amount\\\\\": 180.0, \\\\\"description\\\\\": \\\\\"Insurance claim processing for OP-1001\\\\\", \\\\\"customer_id\\\\\": \\\\\"qwerty\\\\\", \\\\\"policy_number\\\\\": \\\\\"POL_OP-1001\\\\\", \\\\\"incident_date\\\\\": \\\\\"2024-01-15\\\\\", \\\\\"location\\\\\": \\\\\"Dashboard Processing\\\\\", \\\\\"documents\\\\\": [\\\\\"claim_form.pdf\\\\\", \\\\\"supporting_documents.pdf\\\\\"], \\\\\"customer_statement\\\\\": \\\\\"Processing Outpatient claim through dashboard interface\\\\\", \\\\\"patient_name\\\\\": \\\\\"John Smith\\\\\", \\\\\"provider\\\\\": \\\\\"CLN-ALPHA\\\\\", \\\\\"member_id\\\\\": \\\\\"M-001\\\\\", \\\\\"region\\\\\": \\\\\"US\\\\\"}}\", \"session_id\": \"4c01337d-f5f2-4102-b44a-5d8c4b977f67\", \"context\": \"Request from intelligent orchestrator: {\\\\\"action\\\\\": \\\\\"process_claim\\\\\", \\\\\"claim_id\\\\\": \\\\\"OP-1001\\\\\", \\\\\"claim_data\\\\\": {\\\\\"claim_id\\\\\": \\\\\"OP-1001\\\\\", \\\\\"type\\\\\": \\\\\"outpatient\\\\\", \\\\\"amount\\\\\": 180.0, \\\\\"description\\\\\": \\\\\"Insurance claim processing for OP-1001\\\\\", \\\\\"customer_id\\\\\": \\\\\"qwerty\\\\\", \\\\\"policy_number\\\\\": \\\\\"POL_OP-1001\\\\\", \\\\\"incident_date\\\\\": \\\\\"2024-01-15\\\\\", \\\\\"location\\\\\": \\\\\"Dashboard Processing\\\\\", \\\\\"documents\\\\\": [\\\\\"claim_form.pdf\\\\\", \\\\\"supporting_documents.pdf\\\\\"], \\\\\"customer_statement\\\\\": \\\\\"Processing Outpatient claim through dashboard interface\\\\\", \\\\\"patient_name\\\\\": \\\\\"John Smith\\\\\", \\\\\"provider\\\\\": \\\\\"CLN-ALPHA\\\\\", \\\\\"member_id\\\\\": \\\\\"M-001\\\\\", \\\\\"region\\\\\": \\\\\"US\\\\\"}}\"}'}], 'role': 'user', 'taskId': 'e76ae421-888a-474f-b398-3db8bfeb3b58'}, {'contextId': '08b019b2-5f67-4e3a-8984-e8959e2eb5ed', 'kind': 'message', 'messageId': 'd5b47e13-419e-497a-b5aa-e06cb6f6e460', 'parts': [{'kind': 'text', 'text': '🏥 Starting claim intake clarification...'}], 'role': 'agent', 'taskId': 'e76ae421-888a-474f-b398-3db8bfeb3b58'}], 'id': 'e76ae421-888a-474f-b398-3db8bfeb3b58', 'kind': 'task', 'status': {'state': 'completed'}}}",
+          "message": "I consulted our intake_clarifier specialist and here's what they found:\n\n{'id': 'a2a-intake_clarifier-92ca59b8-d20d-45ef-bc44-fed5c1fa79ee', 'jsonrpc': '2.0', 'result': {'artifacts': [{'artifactId': 'b2489bf0-0087-443f-8de4-2237f21e6a85', 'description': 'Result of intake clarification process.', 'name': 'intake_clarification_result', 'parts': [{'kind': 'text', 'text': '{\\n  \"status\": \"success\",\\n  \"claim_id\": \"OP-1001\",\\n  \"clarification_result\": {\\n    \"claim_id\": \"OP-1001\",\\n    \"validation_status\": \"requires_clarification\",\\n    \"completeness_score\": 40,\\n    \"fraud_risk_score\": 10,\\n    \"issues\": [\\n      \"customer_id\",\\n      \"description\",\\n      \"insufficient_description\"\\n    ],\\n    \"questions\": [\\n      \"Please provide customer id\",\\n      \"Please provide description\",\\n      \"Can you provide more detailed description?\"\\n    ],\\n    \"recommendations\": [\\n      \"Address validation issues before proceeding\"\\n    ]\\n  },\\n  \"agent\": \"intake_clarifier\"\\n}'}]}], 'contextId': '941ed246-7da3-4852-8e0d-faa678ce90f9', 'history': [{'contextId': '941ed246-7da3-4852-8e0d-faa678ce90f9', 'kind': 'message', 'messageId': 'msg-277c8136-74cd-41c9-bf03-f86425cdfaf9', 'parts': [{'kind': 'text', 'text': 'Task: claim_intake: {\"action\": \"process_claim\", \"claim_id\": \"OP-1001\", \"claim_data\": {\"claim_id\": \"OP-1001\", \"type\": \"outpatient\", \"amount\": 180.0, \"description\": \"Insurance claim processing for OP-1001\", \"customer_id\": \"qewrt\", \"policy_number\": \"POL_OP-1001\", \"incident_date\": \"2024-01-15\", \"location\": \"Dashboard Processing\", \"documents\": [\"claim_form.pdf\", \"supporting_documents.pdf\"], \"customer_statement\": \"Processing Outpatient claim through dashboard interface\", \"patient_name\": \"John Smith\", \"provider\": \"CLN-ALPHA\", \"member_id\": \"M-001\", \"region\": \"US\"}}. Parameters: {\"action\": \"claim_intake\", \"query\": \"{\\\\\"action\\\\\": \\\\\"process_claim\\\\\", \\\\\"claim_id\\\\\": \\\\\"OP-1001\\\\\", \\\\\"claim_data\\\\\": {\\\\\"claim_id\\\\\": \\\\\"OP-1001\\\\\", \\\\\"type\\\\\": \\\\\"outpatient\\\\\", \\\\\"amount\\\\\": 180.0, \\\\\"description\\\\\": \\\\\"Insurance claim processing for OP-1001\\\\\", \\\\\"customer_id\\\\\": \\\\\"qewrt\\\\\", \\\\\"policy_number\\\\\": \\\\\"POL_OP-1001\\\\\", \\\\\"incident_date\\\\\": \\\\\"2024-01-15\\\\\", \\\\\"location\\\\\": \\\\\"Dashboard Processing\\\\\", \\\\\"documents\\\\\": [\\\\\"claim_form.pdf\\\\\", \\\\\"supporting_documents.pdf\\\\\"], \\\\\"customer_statement\\\\\": \\\\\"Processing Outpatient claim through dashboard interface\\\\\", \\\\\"patient_name\\\\\": \\\\\"John Smith\\\\\", \\\\\"provider\\\\\": \\\\\"CLN-ALPHA\\\\\", \\\\\"member_id\\\\\": \\\\\"M-001\\\\\", \\\\\"region\\\\\": \\\\\"US\\\\\"}}\", \"session_id\": \"a82d91e3-4561-4a41-bf9b-253be669a352\", \"context\": \"Request from intelligent orchestrator: {\\\\\"action\\\\\": \\\\\"process_claim\\\\\", \\\\\"claim_id\\\\\": \\\\\"OP-1001\\\\\", \\\\\"claim_data\\\\\": {\\\\\"claim_id\\\\\": \\\\\"OP-1001\\\\\", \\\\\"type\\\\\": \\\\\"outpatient\\\\\", \\\\\"amount\\\\\": 180.0, \\\\\"description\\\\\": \\\\\"Insurance claim processing for OP-1001\\\\\", \\\\\"customer_id\\\\\": \\\\\"qewrt\\\\\", \\\\\"policy_number\\\\\": \\\\\"POL_OP-1001\\\\\", \\\\\"incident_date\\\\\": \\\\\"2024-01-15\\\\\", \\\\\"location\\\\\": \\\\\"Dashboard Processing\\\\\", \\\\\"documents\\\\\": [\\\\\"claim_form.pdf\\\\\", \\\\\"supporting_documents.pdf\\\\\"], \\\\\"customer_statement\\\\\": \\\\\"Processing Outpatient claim through dashboard interface\\\\\", \\\\\"patient_name\\\\\": \\\\\"John Smith\\\\\", \\\\\"provider\\\\\": \\\\\"CLN-ALPHA\\\\\", \\\\\"member_id\\\\\": \\\\\"M-001\\\\\", \\\\\"region\\\\\": \\\\\"US\\\\\"}}\"}'}], 'role': 'user', 'taskId': 'd7f08ebf-adea-4cb2-bf72-25a184a7a7ed'}, {'contextId': '941ed246-7da3-4852-8e0d-faa678ce90f9', 'kind': 'message', 'messageId': '704183de-0a89-4175-bd60-8110c2bb5fbf', 'parts': [{'kind': 'text', 'text': '🏥 Starting claim intake clarification...'}], 'role': 'agent', 'taskId': 'd7f08ebf-adea-4cb2-bf72-25a184a7a7ed'}], 'id': 'd7f08ebf-adea-4cb2-bf72-25a184a7a7ed', 'kind': 'task', 'status': {'state': 'completed'}}}",
           "agent_used": "intake_clarifier",
           "task_type": "claim_intake",
-          "original_query": "{\"action\": \"process_claim\", \"claim_id\": \"OP-1001\", \"claim_data\": {\"claim_id\": \"OP-1001\", \"type\": \"outpatient\", \"amount\": 180.0, \"description\": \"Insurance claim processing for OP-1001\", \"customer_id\": \"qwerty\", \"policy_number\": \"POL_OP-1001\", \"incident_date\": \"2024-01-15\", \"location\": \"Dashboard Processing\", \"documents\": [\"claim_form.pdf\", \"supporting_documents.pdf\"], \"customer_statement\": \"Processing Outpatient claim through dashboard interface\", \"patient_name\": \"John Smith\", \"provider\": \"CLN-ALPHA\", \"member_id\": \"M-001\", \"region\": \"US\"}}",
-          "timestamp": "2025-09-09T15:30:36.285386"
+          "original_query": "{\"action\": \"process_claim\", \"claim_id\": \"OP-1001\", \"claim_data\": {\"claim_id\": \"OP-1001\", \"type\": \"outpatient\", \"amount\": 180.0, \"description\": \"Insurance claim processing for OP-1001\", \"customer_id\": \"qewrt\", \"policy_number\": \"POL_OP-1001\", \"incident_date\": \"2024-01-15\", \"location\": \"Dashboard Processing\", \"documents\": [\"claim_form.pdf\", \"supporting_documents.pdf\"], \"customer_statement\": \"Processing Outpatient claim through dashboard interface\", \"patient_name\": \"John Smith\", \"provider\": \"CLN-ALPHA\", \"member_id\": \"M-001\", \"region\": \"US\"}}",
+          "timestamp": "2025-09-09T16:25:33.839385"
         }
       },
       "duration_ms": null
@@ -703,7 +703,7 @@
       "title": "📤 Task Dispatch",
       "description": "Sending task to document_intelligence",
       "status": "in_progress",
-      "timestamp": "2025-09-09T15:30:37.724681",
+      "timestamp": "2025-09-09T16:25:35.275655",
       "agent_name": "document_intelligence",
       "agent_reasoning": null,
       "details": {
@@ -719,18 +719,18 @@
       "title": "📥 Agent Response - document_intelligence",
       "description": "Successfully completed document_analysis",
       "status": "completed",
-      "timestamp": "2025-09-09T15:30:39.297501",
+      "timestamp": "2025-09-09T16:25:36.809709",
       "agent_name": "document_intelligence",
       "agent_reasoning": null,
       "details": {
         "result": {
           "status": "success",
           "response_type": "agent_response",
-          "message": "I consulted our document_intelligence specialist and here's what they found:\n\n{'id': 'a2a-document_intelligence-0367ad56-73e8-417e-a5a3-24d6bda2947e', 'jsonrpc': '2.0', 'result': {'kind': 'message', 'messageId': '82438d67-8812-4824-8564-bf7e8396fb6f', 'parts': [{'kind': 'text', 'text': '{\\n  \"status\": \"success\",\\n  \"message\": \"Document intelligence completed: General document intelligence\",\\n  \"extracted_codes\": [\\n    \"M79.3\",\\n    \"Z51.11\"\\n  ],\\n  \"confidence\": 0.95\\n}'}], 'role': 'agent', 'taskId': '53e35ef1-79d7-4a07-9b91-eebd999921ef'}}",
+          "message": "I consulted our document_intelligence specialist and here's what they found:\n\n{'id': 'a2a-document_intelligence-baaf8d75-295e-4887-a936-4faffa8e8dc6', 'jsonrpc': '2.0', 'result': {'kind': 'message', 'messageId': '9f7a85bf-e572-41df-8a8d-f508035540fc', 'parts': [{'kind': 'text', 'text': '{\\n  \"status\": \"success\",\\n  \"message\": \"Document intelligence completed: General document intelligence\",\\n  \"extracted_codes\": [\\n    \"M79.3\",\\n    \"Z51.11\"\\n  ],\\n  \"confidence\": 0.95\\n}'}], 'role': 'agent', 'taskId': '88f909c4-22d4-48bb-99fc-b65bea050846'}}",
           "agent_used": "document_intelligence",
           "task_type": "document_analysis",
-          "original_query": "{\"action\": \"process_claim\", \"claim_id\": \"OP-1001\", \"claim_data\": {\"claim_id\": \"OP-1001\", \"type\": \"outpatient\", \"amount\": 180.0, \"description\": \"Insurance claim processing for OP-1001\", \"customer_id\": \"qwerty\", \"policy_number\": \"POL_OP-1001\", \"incident_date\": \"2024-01-15\", \"location\": \"Dashboard Processing\", \"documents\": [\"claim_form.pdf\", \"supporting_documents.pdf\"], \"customer_statement\": \"Processing Outpatient claim through dashboard interface\", \"patient_name\": \"John Smith\", \"provider\": \"CLN-ALPHA\", \"member_id\": \"M-001\", \"region\": \"US\"}}",
-          "timestamp": "2025-09-09T15:30:39.297476"
+          "original_query": "{\"action\": \"process_claim\", \"claim_id\": \"OP-1001\", \"claim_data\": {\"claim_id\": \"OP-1001\", \"type\": \"outpatient\", \"amount\": 180.0, \"description\": \"Insurance claim processing for OP-1001\", \"customer_id\": \"qewrt\", \"policy_number\": \"POL_OP-1001\", \"incident_date\": \"2024-01-15\", \"location\": \"Dashboard Processing\", \"documents\": [\"claim_form.pdf\", \"supporting_documents.pdf\"], \"customer_statement\": \"Processing Outpatient claim through dashboard interface\", \"patient_name\": \"John Smith\", \"provider\": \"CLN-ALPHA\", \"member_id\": \"M-001\", \"region\": \"US\"}}",
+          "timestamp": "2025-09-09T16:25:36.809687"
         }
       },
       "duration_ms": null
@@ -742,7 +742,7 @@
       "title": "📤 Task Dispatch",
       "description": "Sending task to coverage_rules_engine",
       "status": "in_progress",
-      "timestamp": "2025-09-09T15:30:40.713337",
+      "timestamp": "2025-09-09T16:25:38.329995",
       "agent_name": "coverage_rules_engine",
       "agent_reasoning": null,
       "details": {
@@ -758,18 +758,18 @@
       "title": "📥 Agent Response - coverage_rules_engine",
       "description": "Successfully completed coverage_evaluation",
       "status": "completed",
-      "timestamp": "2025-09-09T15:30:42.214703",
+      "timestamp": "2025-09-09T16:25:39.910060",
       "agent_name": "coverage_rules_engine",
       "agent_reasoning": null,
       "details": {
         "result": {
           "status": "success",
           "response_type": "agent_response",
-          "message": "I consulted our coverage_rules_engine specialist and here's what they found:\n\n{'id': 'a2a-coverage_rules_engine-580aa974-0d9a-4e24-bdaf-30d79d5108db', 'jsonrpc': '2.0', 'result': {'kind': 'message', 'messageId': '471beb37-d647-455d-9162-407676e29631', 'parts': [{'kind': 'text', 'text': '{\\n  \"status\": \"success\",\\n  \"message\": \"Coverage evaluation completed: General coverage evaluation\",\\n  \"eligibility\": \"approved\",\\n  \"covered_amount\": 350.0,\\n  \"coverage_percentage\": 41.18,\\n  \"deductible\": 500\\n}'}], 'role': 'agent', 'taskId': '0199b29c-979c-4488-9de9-78e25434503d'}}",
+          "message": "I consulted our coverage_rules_engine specialist and here's what they found:\n\n{'id': 'a2a-coverage_rules_engine-275bed31-54e7-47c3-b905-540161ad0cca', 'jsonrpc': '2.0', 'result': {'kind': 'message', 'messageId': '6efb7b16-a03e-449c-8d8c-62efa0d8702d', 'parts': [{'kind': 'text', 'text': '{\\n  \"status\": \"success\",\\n  \"message\": \"Coverage evaluation completed: General coverage evaluation\",\\n  \"eligibility\": \"approved\",\\n  \"covered_amount\": 350.0,\\n  \"coverage_percentage\": 41.18,\\n  \"deductible\": 500\\n}'}], 'role': 'agent', 'taskId': '20c18fec-f41f-42c0-b756-1ff1c59e69fc'}}",
           "agent_used": "coverage_rules_engine",
           "task_type": "coverage_evaluation",
-          "original_query": "{\"action\": \"process_claim\", \"claim_id\": \"OP-1001\", \"claim_data\": {\"claim_id\": \"OP-1001\", \"type\": \"outpatient\", \"amount\": 180.0, \"description\": \"Insurance claim processing for OP-1001\", \"customer_id\": \"qwerty\", \"policy_number\": \"POL_OP-1001\", \"incident_date\": \"2024-01-15\", \"location\": \"Dashboard Processing\", \"documents\": [\"claim_form.pdf\", \"supporting_documents.pdf\"], \"customer_statement\": \"Processing Outpatient claim through dashboard interface\", \"patient_name\": \"John Smith\", \"provider\": \"CLN-ALPHA\", \"member_id\": \"M-001\", \"region\": \"US\"}}",
-          "timestamp": "2025-09-09T15:30:42.214618"
+          "original_query": "{\"action\": \"process_claim\", \"claim_id\": \"OP-1001\", \"claim_data\": {\"claim_id\": \"OP-1001\", \"type\": \"outpatient\", \"amount\": 180.0, \"description\": \"Insurance claim processing for OP-1001\", \"customer_id\": \"qewrt\", \"policy_number\": \"POL_OP-1001\", \"incident_date\": \"2024-01-15\", \"location\": \"Dashboard Processing\", \"documents\": [\"claim_form.pdf\", \"supporting_documents.pdf\"], \"customer_statement\": \"Processing Outpatient claim through dashboard interface\", \"patient_name\": \"John Smith\", \"provider\": \"CLN-ALPHA\", \"member_id\": \"M-001\", \"region\": \"US\"}}",
+          "timestamp": "2025-09-09T16:25:39.910026"
         }
       },
       "duration_ms": null
@@ -781,7 +781,7 @@
       "title": "🎉 Processing Complete",
       "description": "Claim OP-1001 processed successfully",
       "status": "completed",
-      "timestamp": "2025-09-09T15:30:43.600152",
+      "timestamp": "2025-09-09T16:25:41.338605",
       "agent_name": null,
       "agent_reasoning": null,
       "details": {
@@ -799,7 +799,7 @@
       "title": "🎯 Agent Selection - Intelligent_Routing",
       "description": "Selected Azure AI GPT-4o for intelligent_routing",
       "status": "in_progress",
-      "timestamp": "2025-09-09T15:32:09.844663",
+      "timestamp": "2025-09-09T16:29:58.107495",
       "agent_name": "azure_ai_foundry",
       "agent_reasoning": "Outpatient claim with documents, amount: $220.0",
       "details": {
@@ -816,7 +816,7 @@
       "title": "📤 Task Dispatch",
       "description": "Sending task to intake_clarifier",
       "status": "in_progress",
-      "timestamp": "2025-09-09T15:32:11.268404",
+      "timestamp": "2025-09-09T16:29:59.631154",
       "agent_name": "intake_clarifier",
       "agent_reasoning": null,
       "details": {
@@ -832,18 +832,18 @@
       "title": "📥 Agent Response - intake_clarifier",
       "description": "Successfully completed claim_intake",
       "status": "completed",
-      "timestamp": "2025-09-09T15:32:12.708609",
+      "timestamp": "2025-09-09T16:30:01.101451",
       "agent_name": "intake_clarifier",
       "agent_reasoning": null,
       "details": {
         "result": {
           "status": "success",
           "response_type": "agent_response",
-          "message": "I consulted our intake_clarifier specialist and here's what they found:\n\n{'id': 'a2a-intake_clarifier-57a6e659-0fed-4ca1-a1c9-2eb676399f40', 'jsonrpc': '2.0', 'result': {'artifacts': [{'artifactId': '072e79ba-f8c0-4eb2-b809-e55236d09956', 'description': 'Result of intake clarification process.', 'name': 'intake_clarification_result', 'parts': [{'kind': 'text', 'text': '{\\n  \"status\": \"success\",\\n  \"claim_id\": \"OP-1002\",\\n  \"clarification_result\": {\\n    \"claim_id\": \"OP-1002\",\\n    \"validation_status\": \"requires_clarification\",\\n    \"completeness_score\": 40,\\n    \"fraud_risk_score\": 10,\\n    \"issues\": [\\n      \"customer_id\",\\n      \"description\",\\n      \"insufficient_description\"\\n    ],\\n    \"questions\": [\\n      \"Please provide customer id\",\\n      \"Please provide description\",\\n      \"Can you provide more detailed description?\"\\n    ],\\n    \"recommendations\": [\\n      \"Address validation issues before proceeding\"\\n    ]\\n  },\\n  \"agent\": \"intake_clarifier\"\\n}'}]}], 'contextId': 'c2f24ceb-60e6-410b-8e38-27887e6840a4', 'history': [{'contextId': 'c2f24ceb-60e6-410b-8e38-27887e6840a4', 'kind': 'message', 'messageId': 'msg-795fc481-2c8e-4766-9c00-87905c2e8301', 'parts': [{'kind': 'text', 'text': 'Task: claim_intake: {\"action\": \"process_claim\", \"claim_id\": \"OP-1002\", \"claim_data\": {\"claim_id\": \"OP-1002\", \"type\": \"outpatient\", \"amount\": 220.0, \"description\": \"Insurance claim processing for OP-1002\", \"customer_id\": \"adsf\", \"policy_number\": \"POL_OP-1002\", \"incident_date\": \"2024-01-15\", \"location\": \"Dashboard Processing\", \"documents\": [\"claim_form.pdf\", \"supporting_documents.pdf\"], \"customer_statement\": \"Processing Outpatient claim through dashboard interface\", \"patient_name\": \"Jane Doe\", \"provider\": \"CLN-BETA\", \"member_id\": \"M-002\", \"region\": \"US\"}}. Parameters: {\"action\": \"claim_intake\", \"query\": \"{\\\\\"action\\\\\": \\\\\"process_claim\\\\\", \\\\\"claim_id\\\\\": \\\\\"OP-1002\\\\\", \\\\\"claim_data\\\\\": {\\\\\"claim_id\\\\\": \\\\\"OP-1002\\\\\", \\\\\"type\\\\\": \\\\\"outpatient\\\\\", \\\\\"amount\\\\\": 220.0, \\\\\"description\\\\\": \\\\\"Insurance claim processing for OP-1002\\\\\", \\\\\"customer_id\\\\\": \\\\\"adsf\\\\\", \\\\\"policy_number\\\\\": \\\\\"POL_OP-1002\\\\\", \\\\\"incident_date\\\\\": \\\\\"2024-01-15\\\\\", \\\\\"location\\\\\": \\\\\"Dashboard Processing\\\\\", \\\\\"documents\\\\\": [\\\\\"claim_form.pdf\\\\\", \\\\\"supporting_documents.pdf\\\\\"], \\\\\"customer_statement\\\\\": \\\\\"Processing Outpatient claim through dashboard interface\\\\\", \\\\\"patient_name\\\\\": \\\\\"Jane Doe\\\\\", \\\\\"provider\\\\\": \\\\\"CLN-BETA\\\\\", \\\\\"member_id\\\\\": \\\\\"M-002\\\\\", \\\\\"region\\\\\": \\\\\"US\\\\\"}}\", \"session_id\": \"ff192910-fc9e-42df-8b33-9a6f05afe0ad\", \"context\": \"Request from intelligent orchestrator: {\\\\\"action\\\\\": \\\\\"process_claim\\\\\", \\\\\"claim_id\\\\\": \\\\\"OP-1002\\\\\", \\\\\"claim_data\\\\\": {\\\\\"claim_id\\\\\": \\\\\"OP-1002\\\\\", \\\\\"type\\\\\": \\\\\"outpatient\\\\\", \\\\\"amount\\\\\": 220.0, \\\\\"description\\\\\": \\\\\"Insurance claim processing for OP-1002\\\\\", \\\\\"customer_id\\\\\": \\\\\"adsf\\\\\", \\\\\"policy_number\\\\\": \\\\\"POL_OP-1002\\\\\", \\\\\"incident_date\\\\\": \\\\\"2024-01-15\\\\\", \\\\\"location\\\\\": \\\\\"Dashboard Processing\\\\\", \\\\\"documents\\\\\": [\\\\\"claim_form.pdf\\\\\", \\\\\"supporting_documents.pdf\\\\\"], \\\\\"customer_statement\\\\\": \\\\\"Processing Outpatient claim through dashboard interface\\\\\", \\\\\"patient_name\\\\\": \\\\\"Jane Doe\\\\\", \\\\\"provider\\\\\": \\\\\"CLN-BETA\\\\\", \\\\\"member_id\\\\\": \\\\\"M-002\\\\\", \\\\\"region\\\\\": \\\\\"US\\\\\"}}\"}'}], 'role': 'user', 'taskId': 'b3f6f4f7-6311-4e1a-85ab-f84a78e6a6b4'}, {'contextId': 'c2f24ceb-60e6-410b-8e38-27887e6840a4', 'kind': 'message', 'messageId': '2dae6674-61f0-4ec7-9d3d-0e8506718c0c', 'parts': [{'kind': 'text', 'text': '🏥 Starting claim intake clarification...'}], 'role': 'agent', 'taskId': 'b3f6f4f7-6311-4e1a-85ab-f84a78e6a6b4'}], 'id': 'b3f6f4f7-6311-4e1a-85ab-f84a78e6a6b4', 'kind': 'task', 'status': {'state': 'completed'}}}",
+          "message": "I consulted our intake_clarifier specialist and here's what they found:\n\n{'id': 'a2a-intake_clarifier-5ba47b28-5c03-4618-9e6c-44889a9d1389', 'jsonrpc': '2.0', 'result': {'artifacts': [{'artifactId': '3efeda22-e8d5-4e92-9405-0f5617bece4e', 'description': 'Result of intake clarification process.', 'name': 'intake_clarification_result', 'parts': [{'kind': 'text', 'text': '{\\n  \"status\": \"success\",\\n  \"claim_id\": \"OP-1002\",\\n  \"clarification_result\": {\\n    \"claim_id\": \"OP-1002\",\\n    \"validation_status\": \"requires_clarification\",\\n    \"completeness_score\": 40,\\n    \"fraud_risk_score\": 10,\\n    \"issues\": [\\n      \"customer_id\",\\n      \"description\",\\n      \"insufficient_description\"\\n    ],\\n    \"questions\": [\\n      \"Please provide customer id\",\\n      \"Please provide description\",\\n      \"Can you provide more detailed description?\"\\n    ],\\n    \"recommendations\": [\\n      \"Address validation issues before proceeding\"\\n    ]\\n  },\\n  \"agent\": \"intake_clarifier\"\\n}'}]}], 'contextId': 'fcfa09bd-502e-4ac5-bccb-601fe400168b', 'history': [{'contextId': 'fcfa09bd-502e-4ac5-bccb-601fe400168b', 'kind': 'message', 'messageId': 'msg-78c4f383-308d-44f3-9fda-7f7b2795cc22', 'parts': [{'kind': 'text', 'text': 'Task: claim_intake: {\"action\": \"process_claim\", \"claim_id\": \"OP-1002\", \"claim_data\": {\"claim_id\": \"OP-1002\", \"type\": \"outpatient\", \"amount\": 220.0, \"description\": \"Insurance claim processing for OP-1002\", \"customer_id\": \"dfsa\", \"policy_number\": \"POL_OP-1002\", \"incident_date\": \"2024-01-15\", \"location\": \"Dashboard Processing\", \"documents\": [\"claim_form.pdf\", \"supporting_documents.pdf\"], \"customer_statement\": \"Processing Outpatient claim through dashboard interface\", \"patient_name\": \"Jane Doe\", \"provider\": \"CLN-BETA\", \"member_id\": \"M-002\", \"region\": \"US\"}}. Parameters: {\"action\": \"claim_intake\", \"query\": \"{\\\\\"action\\\\\": \\\\\"process_claim\\\\\", \\\\\"claim_id\\\\\": \\\\\"OP-1002\\\\\", \\\\\"claim_data\\\\\": {\\\\\"claim_id\\\\\": \\\\\"OP-1002\\\\\", \\\\\"type\\\\\": \\\\\"outpatient\\\\\", \\\\\"amount\\\\\": 220.0, \\\\\"description\\\\\": \\\\\"Insurance claim processing for OP-1002\\\\\", \\\\\"customer_id\\\\\": \\\\\"dfsa\\\\\", \\\\\"policy_number\\\\\": \\\\\"POL_OP-1002\\\\\", \\\\\"incident_date\\\\\": \\\\\"2024-01-15\\\\\", \\\\\"location\\\\\": \\\\\"Dashboard Processing\\\\\", \\\\\"documents\\\\\": [\\\\\"claim_form.pdf\\\\\", \\\\\"supporting_documents.pdf\\\\\"], \\\\\"customer_statement\\\\\": \\\\\"Processing Outpatient claim through dashboard interface\\\\\", \\\\\"patient_name\\\\\": \\\\\"Jane Doe\\\\\", \\\\\"provider\\\\\": \\\\\"CLN-BETA\\\\\", \\\\\"member_id\\\\\": \\\\\"M-002\\\\\", \\\\\"region\\\\\": \\\\\"US\\\\\"}}\", \"session_id\": \"ccfe5254-3284-45c8-bde6-06617846def0\", \"context\": \"Request from intelligent orchestrator: {\\\\\"action\\\\\": \\\\\"process_claim\\\\\", \\\\\"claim_id\\\\\": \\\\\"OP-1002\\\\\", \\\\\"claim_data\\\\\": {\\\\\"claim_id\\\\\": \\\\\"OP-1002\\\\\", \\\\\"type\\\\\": \\\\\"outpatient\\\\\", \\\\\"amount\\\\\": 220.0, \\\\\"description\\\\\": \\\\\"Insurance claim processing for OP-1002\\\\\", \\\\\"customer_id\\\\\": \\\\\"dfsa\\\\\", \\\\\"policy_number\\\\\": \\\\\"POL_OP-1002\\\\\", \\\\\"incident_date\\\\\": \\\\\"2024-01-15\\\\\", \\\\\"location\\\\\": \\\\\"Dashboard Processing\\\\\", \\\\\"documents\\\\\": [\\\\\"claim_form.pdf\\\\\", \\\\\"supporting_documents.pdf\\\\\"], \\\\\"customer_statement\\\\\": \\\\\"Processing Outpatient claim through dashboard interface\\\\\", \\\\\"patient_name\\\\\": \\\\\"Jane Doe\\\\\", \\\\\"provider\\\\\": \\\\\"CLN-BETA\\\\\", \\\\\"member_id\\\\\": \\\\\"M-002\\\\\", \\\\\"region\\\\\": \\\\\"US\\\\\"}}\"}'}], 'role': 'user', 'taskId': '4a44a6f1-f687-48b3-ab41-9bda3bb6d0d8'}, {'contextId': 'fcfa09bd-502e-4ac5-bccb-601fe400168b', 'kind': 'message', 'messageId': '3408828a-17eb-48e1-a515-08ab27700476', 'parts': [{'kind': 'text', 'text': '🏥 Starting claim intake clarification...'}], 'role': 'agent', 'taskId': '4a44a6f1-f687-48b3-ab41-9bda3bb6d0d8'}], 'id': '4a44a6f1-f687-48b3-ab41-9bda3bb6d0d8', 'kind': 'task', 'status': {'state': 'completed'}}}",
           "agent_used": "intake_clarifier",
           "task_type": "claim_intake",
-          "original_query": "{\"action\": \"process_claim\", \"claim_id\": \"OP-1002\", \"claim_data\": {\"claim_id\": \"OP-1002\", \"type\": \"outpatient\", \"amount\": 220.0, \"description\": \"Insurance claim processing for OP-1002\", \"customer_id\": \"adsf\", \"policy_number\": \"POL_OP-1002\", \"incident_date\": \"2024-01-15\", \"location\": \"Dashboard Processing\", \"documents\": [\"claim_form.pdf\", \"supporting_documents.pdf\"], \"customer_statement\": \"Processing Outpatient claim through dashboard interface\", \"patient_name\": \"Jane Doe\", \"provider\": \"CLN-BETA\", \"member_id\": \"M-002\", \"region\": \"US\"}}",
-          "timestamp": "2025-09-09T15:32:12.708554"
+          "original_query": "{\"action\": \"process_claim\", \"claim_id\": \"OP-1002\", \"claim_data\": {\"claim_id\": \"OP-1002\", \"type\": \"outpatient\", \"amount\": 220.0, \"description\": \"Insurance claim processing for OP-1002\", \"customer_id\": \"dfsa\", \"policy_number\": \"POL_OP-1002\", \"incident_date\": \"2024-01-15\", \"location\": \"Dashboard Processing\", \"documents\": [\"claim_form.pdf\", \"supporting_documents.pdf\"], \"customer_statement\": \"Processing Outpatient claim through dashboard interface\", \"patient_name\": \"Jane Doe\", \"provider\": \"CLN-BETA\", \"member_id\": \"M-002\", \"region\": \"US\"}}",
+          "timestamp": "2025-09-09T16:30:01.101421"
         }
       },
       "duration_ms": null
@@ -855,7 +855,7 @@
       "title": "📤 Task Dispatch",
       "description": "Sending task to document_intelligence",
       "status": "in_progress",
-      "timestamp": "2025-09-09T15:32:14.102430",
+      "timestamp": "2025-09-09T16:30:02.541060",
       "agent_name": "document_intelligence",
       "agent_reasoning": null,
       "details": {
@@ -871,18 +871,18 @@
       "title": "📥 Agent Response - document_intelligence",
       "description": "Successfully completed document_analysis",
       "status": "completed",
-      "timestamp": "2025-09-09T15:32:15.632737",
+      "timestamp": "2025-09-09T16:30:04.086505",
       "agent_name": "document_intelligence",
       "agent_reasoning": null,
       "details": {
         "result": {
           "status": "success",
           "response_type": "agent_response",
-          "message": "I consulted our document_intelligence specialist and here's what they found:\n\n{'id': 'a2a-document_intelligence-708188bd-a4bc-4752-a45e-0af6e3f88c52', 'jsonrpc': '2.0', 'result': {'kind': 'message', 'messageId': '50285df9-483e-4054-88d0-57c0bf307e68', 'parts': [{'kind': 'text', 'text': '{\\n  \"status\": \"success\",\\n  \"message\": \"Document intelligence completed: General document intelligence\",\\n  \"extracted_codes\": [\\n    \"M79.3\",\\n    \"Z51.11\"\\n  ],\\n  \"confidence\": 0.95\\n}'}], 'role': 'agent', 'taskId': 'ce918f8d-57aa-4f4b-89f9-6e8ed0a5727c'}}",
+          "message": "I consulted our document_intelligence specialist and here's what they found:\n\n{'id': 'a2a-document_intelligence-8d56dc17-3a45-46ed-a2aa-87abc255f6a9', 'jsonrpc': '2.0', 'result': {'kind': 'message', 'messageId': '8190bfde-768c-4b03-b594-03cca1b1a7dd', 'parts': [{'kind': 'text', 'text': '{\\n  \"status\": \"success\",\\n  \"message\": \"Document intelligence completed: General document intelligence\",\\n  \"extracted_codes\": [\\n    \"M79.3\",\\n    \"Z51.11\"\\n  ],\\n  \"confidence\": 0.95\\n}'}], 'role': 'agent', 'taskId': 'f78e075b-8c27-45d3-b16f-a56e73fbe560'}}",
           "agent_used": "document_intelligence",
           "task_type": "document_analysis",
-          "original_query": "{\"action\": \"process_claim\", \"claim_id\": \"OP-1002\", \"claim_data\": {\"claim_id\": \"OP-1002\", \"type\": \"outpatient\", \"amount\": 220.0, \"description\": \"Insurance claim processing for OP-1002\", \"customer_id\": \"adsf\", \"policy_number\": \"POL_OP-1002\", \"incident_date\": \"2024-01-15\", \"location\": \"Dashboard Processing\", \"documents\": [\"claim_form.pdf\", \"supporting_documents.pdf\"], \"customer_statement\": \"Processing Outpatient claim through dashboard interface\", \"patient_name\": \"Jane Doe\", \"provider\": \"CLN-BETA\", \"member_id\": \"M-002\", \"region\": \"US\"}}",
-          "timestamp": "2025-09-09T15:32:15.632713"
+          "original_query": "{\"action\": \"process_claim\", \"claim_id\": \"OP-1002\", \"claim_data\": {\"claim_id\": \"OP-1002\", \"type\": \"outpatient\", \"amount\": 220.0, \"description\": \"Insurance claim processing for OP-1002\", \"customer_id\": \"dfsa\", \"policy_number\": \"POL_OP-1002\", \"incident_date\": \"2024-01-15\", \"location\": \"Dashboard Processing\", \"documents\": [\"claim_form.pdf\", \"supporting_documents.pdf\"], \"customer_statement\": \"Processing Outpatient claim through dashboard interface\", \"patient_name\": \"Jane Doe\", \"provider\": \"CLN-BETA\", \"member_id\": \"M-002\", \"region\": \"US\"}}",
+          "timestamp": "2025-09-09T16:30:04.086487"
         }
       },
       "duration_ms": null
@@ -894,7 +894,7 @@
       "title": "📤 Task Dispatch",
       "description": "Sending task to coverage_rules_engine",
       "status": "in_progress",
-      "timestamp": "2025-09-09T15:32:17.035880",
+      "timestamp": "2025-09-09T16:30:05.496086",
       "agent_name": "coverage_rules_engine",
       "agent_reasoning": null,
       "details": {
@@ -910,18 +910,18 @@
       "title": "📥 Agent Response - coverage_rules_engine",
       "description": "Successfully completed coverage_evaluation",
       "status": "completed",
-      "timestamp": "2025-09-09T15:32:18.590193",
+      "timestamp": "2025-09-09T16:30:07.067863",
       "agent_name": "coverage_rules_engine",
       "agent_reasoning": null,
       "details": {
         "result": {
           "status": "success",
           "response_type": "agent_response",
-          "message": "I consulted our coverage_rules_engine specialist and here's what they found:\n\n{'id': 'a2a-coverage_rules_engine-e4068f71-336f-4c7e-b0f7-de3ed0159c2b', 'jsonrpc': '2.0', 'result': {'kind': 'message', 'messageId': '572338f5-a83e-4d93-84f4-5c651b677946', 'parts': [{'kind': 'text', 'text': '{\\n  \"status\": \"success\",\\n  \"message\": \"Coverage evaluation completed: General coverage evaluation\",\\n  \"eligibility\": \"approved\",\\n  \"covered_amount\": 350.0,\\n  \"coverage_percentage\": 41.18,\\n  \"deductible\": 500\\n}'}], 'role': 'agent', 'taskId': 'a01f6f66-4d72-48b5-9d00-ec7c04ca828a'}}",
+          "message": "I consulted our coverage_rules_engine specialist and here's what they found:\n\n{'id': 'a2a-coverage_rules_engine-dcb371a1-26cb-4378-be1d-a54c7e355dfd', 'jsonrpc': '2.0', 'result': {'kind': 'message', 'messageId': 'd2fe525b-de96-4097-a58f-c894edced080', 'parts': [{'kind': 'text', 'text': '{\\n  \"status\": \"success\",\\n  \"message\": \"Coverage evaluation completed: General coverage evaluation\",\\n  \"eligibility\": \"approved\",\\n  \"covered_amount\": 350.0,\\n  \"coverage_percentage\": 41.18,\\n  \"deductible\": 500\\n}'}], 'role': 'agent', 'taskId': '7795aa40-6559-464e-b7ee-2ddcf874c5e5'}}",
           "agent_used": "coverage_rules_engine",
           "task_type": "coverage_evaluation",
-          "original_query": "{\"action\": \"process_claim\", \"claim_id\": \"OP-1002\", \"claim_data\": {\"claim_id\": \"OP-1002\", \"type\": \"outpatient\", \"amount\": 220.0, \"description\": \"Insurance claim processing for OP-1002\", \"customer_id\": \"adsf\", \"policy_number\": \"POL_OP-1002\", \"incident_date\": \"2024-01-15\", \"location\": \"Dashboard Processing\", \"documents\": [\"claim_form.pdf\", \"supporting_documents.pdf\"], \"customer_statement\": \"Processing Outpatient claim through dashboard interface\", \"patient_name\": \"Jane Doe\", \"provider\": \"CLN-BETA\", \"member_id\": \"M-002\", \"region\": \"US\"}}",
-          "timestamp": "2025-09-09T15:32:18.590173"
+          "original_query": "{\"action\": \"process_claim\", \"claim_id\": \"OP-1002\", \"claim_data\": {\"claim_id\": \"OP-1002\", \"type\": \"outpatient\", \"amount\": 220.0, \"description\": \"Insurance claim processing for OP-1002\", \"customer_id\": \"dfsa\", \"policy_number\": \"POL_OP-1002\", \"incident_date\": \"2024-01-15\", \"location\": \"Dashboard Processing\", \"documents\": [\"claim_form.pdf\", \"supporting_documents.pdf\"], \"customer_statement\": \"Processing Outpatient claim through dashboard interface\", \"patient_name\": \"Jane Doe\", \"provider\": \"CLN-BETA\", \"member_id\": \"M-002\", \"region\": \"US\"}}",
+          "timestamp": "2025-09-09T16:30:07.067800"
         }
       },
       "duration_ms": null
@@ -933,7 +933,7 @@
       "title": "🎉 Processing Complete",
       "description": "Claim OP-1002 processed successfully",
       "status": "completed",
-      "timestamp": "2025-09-09T15:32:20.017511",
+      "timestamp": "2025-09-09T16:30:08.537252",
       "agent_name": null,
       "agent_reasoning": null,
       "details": {

@@ -88,9 +88,14 @@ def is_claim_actively_processing(claim_id: str) -> bool:
     return result
 
 def get_real_time_processing_steps(claim_id: str = None):
-    """Get real-time processing steps with proper claim filtering"""
+    """Get real-time processing steps only for actively processing claims"""
     terminal_logger.log("DEBUG", "STEPS", f"🔍 Getting real-time steps for claim: {claim_id or 'all'}")
     terminal_logger.log("DEBUG", "STEPS", f"   Current processing claims: {list(current_processing_claims)}")
+    
+    # Only return steps if there are actively processing claims
+    if not current_processing_claims:
+        terminal_logger.log("DEBUG", "STEPS", "   No active processing claims - returning empty")
+        return []
     
     # Force refresh from file to get latest data
     workflow_logger._load_from_file()
@@ -101,40 +106,24 @@ def get_real_time_processing_steps(claim_id: str = None):
         processing_steps_cache[claim_id] = live_steps
         terminal_logger.log("DEBUG", "STEPS", f"   Retrieved {len(live_steps)} steps for active claim {claim_id}")
         return live_steps
-    elif claim_id:
-        # For specific claim, always try to get steps even if not actively processing
-        live_steps = workflow_logger.get_workflow_steps(claim_id)
-        if live_steps:
-            processing_steps_cache[claim_id] = live_steps
-            terminal_logger.log("DEBUG", "STEPS", f"   Retrieved {len(live_steps)} steps for claim {claim_id} (not actively processing)")
-            return live_steps
-        elif claim_id in processing_steps_cache:
-            # Return cached steps for recently completed claim
-            cached_steps = processing_steps_cache[claim_id]
-            terminal_logger.log("DEBUG", "STEPS", f"   Retrieved {len(cached_steps)} cached steps for completed claim {claim_id}")
-            return cached_steps
-    else:
-        # Get steps for any actively processing claims, or recent claims
+    elif not claim_id:
+        # Get steps for any actively processing claims
         all_active_steps = []
         
-        # First, get steps for actively processing claims
         for active_claim_id in current_processing_claims:
             claim_steps = workflow_logger.get_workflow_steps(active_claim_id)
             # Filter to only this specific claim's steps
-            filtered_steps = [step for step in claim_steps if hasattr(step, 'claim_id') and step.claim_id == active_claim_id]
+            filtered_steps = [step for step in claim_steps if isinstance(step, dict) and step.get('claim_id') == active_claim_id]
             processing_steps_cache[active_claim_id] = filtered_steps
             all_active_steps.extend(filtered_steps)
             terminal_logger.log("DEBUG", "STEPS", f"   Retrieved {len(filtered_steps)} steps for active claim {active_claim_id}")
         
-        # If no active claims, show recent steps from any claims that have steps
-        if not all_active_steps and not current_processing_claims:
-            recent_steps = workflow_logger.get_all_recent_steps(limit=20)
-            if recent_steps:
-                all_active_steps = recent_steps[:10]  # Show last 10 steps
-                terminal_logger.log("DEBUG", "STEPS", f"   No active claims, retrieved {len(all_active_steps)} recent steps")
-        
         terminal_logger.log("DEBUG", "STEPS", f"   Total active steps across all claims: {len(all_active_steps)}")
         return all_active_steps
+    
+    # No active processing for this claim
+    terminal_logger.log("DEBUG", "STEPS", f"   Claim {claim_id} is not actively being processed")
+    return []
 
 def get_active_processing_steps(claim_id: str = None):
     """Get workflow steps only for actively processing claims (enhanced with real-time)"""
@@ -766,6 +755,100 @@ async def get_processing_steps(claim_id: str):
         terminal_logger.log("ERROR", "API", f"Error getting workflow steps for {claim_id}: {str(e)}")
         return {"claim_id": claim_id, "steps": []}
 
+@app.get("/api/recent-workflow-steps")
+async def get_recent_workflow_steps():
+    """Get recent workflow steps from the last 2 processing runs"""
+    try:
+        terminal_logger.log("DEBUG", "API", "🔍 Recent workflow steps requested")
+        
+        # Force refresh from file to get latest data
+        workflow_logger._load_from_file()
+        
+        # Get recent steps from all claims, limited to last 2 runs
+        recent_steps = workflow_logger.get_all_recent_steps(limit=20)
+        
+        if recent_steps:
+            # Group by claim_id to get last 2 unique claims
+            claims_seen = set()
+            filtered_steps = []
+            
+            for step in recent_steps:
+                claim_id = step.get('claim_id')
+                if claim_id and len(claims_seen) < 2:
+                    if claim_id not in claims_seen:
+                        claims_seen.add(claim_id)
+                    filtered_steps.append(step)
+                elif claim_id in claims_seen:
+                    filtered_steps.append(step)
+            
+            # Limit to reasonable number of steps
+            filtered_steps = filtered_steps[:15]
+            
+            terminal_logger.log("DEBUG", "API", f"   Retrieved {len(filtered_steps)} recent steps from {len(claims_seen)} recent claims")
+            return {
+                "steps": filtered_steps,
+                "total_steps": len(filtered_steps),
+                "claims_count": len(claims_seen),
+                "status": "success"
+            }
+        else:
+            terminal_logger.log("DEBUG", "API", "   No recent workflow steps found")
+            return {
+                "steps": [],
+                "total_steps": 0,
+                "claims_count": 0,
+                "status": "no_data"
+            }
+            
+    except Exception as e:
+        terminal_logger.log("ERROR", "API", f"Error getting recent workflow steps: {str(e)}")
+        return {
+            "steps": [],
+            "total_steps": 0,
+            "claims_count": 0,
+            "status": "error",
+            "error": str(e)
+        }
+
+@app.get("/api/workflow-history/{claim_id}")
+async def get_workflow_history(claim_id: str):
+    """Get complete workflow history for a specific claim"""
+    try:
+        terminal_logger.log("DEBUG", "API", f"🔍 Workflow history requested for claim: {claim_id}")
+        
+        # Force refresh from file to get latest data
+        workflow_logger._load_from_file()
+        
+        # Get all steps for this claim
+        claim_steps = workflow_logger.get_workflow_steps(claim_id)
+        
+        if claim_steps:
+            terminal_logger.log("DEBUG", "API", f"   Retrieved {len(claim_steps)} workflow steps for {claim_id}")
+            return {
+                "claim_id": claim_id,
+                "steps": claim_steps,
+                "total_steps": len(claim_steps),
+                "status": "success"
+            }
+        else:
+            terminal_logger.log("DEBUG", "API", f"   No workflow steps found for {claim_id}")
+            return {
+                "claim_id": claim_id,
+                "steps": [],
+                "total_steps": 0,
+                "status": "no_data"
+            }
+            
+    except Exception as e:
+        terminal_logger.log("ERROR", "API", f"Error getting workflow history for {claim_id}: {str(e)}")
+        return {
+            "claim_id": claim_id,
+            "steps": [],
+            "total_steps": 0,
+            "status": "error",
+            "error": str(e)
+        }
+
 @app.get("/api/processing-steps") 
 async def get_all_processing_steps():
     """Get real-time processing steps for actively processing claims"""
@@ -829,6 +912,50 @@ async def get_all_processing_steps():
             "steps": [],
             "active_sessions": 0,
             "processing_claims": [],
+            "error": str(e)
+        }
+
+@app.get("/api/workflow-history/{claim_id}")
+async def get_workflow_history(claim_id: str):
+    """Get complete workflow history for a specific claim"""
+    try:
+        terminal_logger.log("DEBUG", "API", f"🔍 Workflow history requested for claim: {claim_id}")
+        
+        # Force reload from file to get latest data
+        workflow_logger._load_from_file()
+        
+        # Get steps for the specific claim
+        claim_steps = workflow_logger.get_workflow_steps(claim_id)
+        
+        terminal_logger.log("DEBUG", "API", f"   Retrieved {len(claim_steps)} workflow steps for {claim_id}")
+        
+        if claim_steps:
+            # Sort steps by timestamp to show proper chronological order
+            sorted_steps = sorted(claim_steps, key=lambda x: x.get('timestamp', ''))
+            
+            terminal_logger.log("DEBUG", "API", f"✅ Returning workflow history for {claim_id}")
+            return {
+                "claim_id": claim_id,
+                "steps": sorted_steps,
+                "total_steps": len(sorted_steps),
+                "has_history": True
+            }
+        else:
+            terminal_logger.log("DEBUG", "API", f"❌ No workflow history found for {claim_id}")
+            return {
+                "claim_id": claim_id,
+                "steps": [],
+                "total_steps": 0,
+                "has_history": False
+            }
+            
+    except Exception as e:
+        terminal_logger.log("ERROR", "API", f"Error getting workflow history for {claim_id}: {str(e)}")
+        return {
+            "claim_id": claim_id,
+            "steps": [],
+            "total_steps": 0,
+            "has_history": False,
             "error": str(e)
         }
 
