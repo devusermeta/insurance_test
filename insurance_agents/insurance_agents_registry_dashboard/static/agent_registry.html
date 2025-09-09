@@ -658,12 +658,15 @@
             cursor: pointer !important;
             transition: all 0.2s ease !important;
             font-weight: 600 !important;
-            min-width: 80px !important;
+            min-width: 100px !important;
             height: 44px !important;
             display: flex !important;
             align-items: center !important;
             justify-content: center !important;
             gap: 0.5rem !important;
+            white-space: nowrap !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
         }
 
         .chat-send-btn:hover:not(:disabled) {
@@ -1388,11 +1391,29 @@
             } catch (error) {
                 console.error('Chat error:', error);
                 removeTypingIndicator();
-                addMessageToChat('error', `Sorry, I encountered an error: ${error.message}. Please check if the Claims Orchestrator is running and try again.`);
+                
+                // Provide user-friendly error message
+                let errorMessage = 'Sorry, I encountered an error. Please try again.';
+                if (error.message.includes('fetch')) {
+                    errorMessage = 'Connection error: Please check if the Claims Orchestrator is running and try again.';
+                } else if (error.message.includes('HTTP')) {
+                    errorMessage = 'Server error: The service might be temporarily unavailable. Please try again in a moment.';
+                }
+                
+                addMessageToChat('error', errorMessage);
             } finally {
-                // Re-enable send button
+                // Re-enable send button with proper state restoration
                 sendBtn.disabled = false;
+                sendBtn.style.minWidth = '80px'; // Ensure minimum width
                 sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Send';
+                
+                // Force re-render to prevent truncation
+                setTimeout(() => {
+                    if (sendBtn.innerHTML !== '<i class="fas fa-paper-plane"></i> Send') {
+                        sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Send';
+                    }
+                }, 100);
+                
                 input.focus();
             }
         }

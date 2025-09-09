@@ -231,12 +231,15 @@
             cursor: pointer !important;
             transition: all 0.2s ease !important;
             font-weight: 600 !important;
-            min-width: 80px !important;
+            min-width: 100px !important;
             height: 44px !important;
             display: flex !important;
             align-items: center !important;
             justify-content: center !important;
             gap: 0.5rem !important;
+            white-space: nowrap !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
         }
 
         .chat-send-btn:hover:not(:disabled) {
@@ -490,6 +493,7 @@
             margin-bottom: 0.5rem;
             background: linear-gradient(135deg, #2a5298, #1e3c72);
             -webkit-background-clip: text;
+            background-clip: text;
             -webkit-text-fill-color: transparent;
         }
 
@@ -614,6 +618,16 @@
         }
 
         .status-pending {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-error {
             background: #f8d7da;
             color: #721c24;
         }
@@ -750,6 +764,16 @@
             color: #2e7d32;
         }
 
+        .activity-skipped {
+            background: #fff3e0;
+            color: #f57c00;
+        }
+
+        .activity-error {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+
         /* Responsive Design */
         @media (max-width: 1200px) {
             .main-content {
@@ -882,17 +906,21 @@
     </main>
 
     <script>
-        // Initialize dashboard
+        // Initialize intelligent claims dashboard
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('🖥️ Insurance Claims Dashboard initializing...');
+            console.log('🧠 Intelligent Claims Dashboard initializing...');
+            console.log('🔧 Supporting Hybrid Intelligence & Dynamic Processing Steps');
+            
             loadClaims();
             loadProcessingSteps();
             
-            // Auto-refresh every 7 seconds for real-time updates
+            // Real-time updates for intelligent orchestrator (faster refresh)
             setInterval(() => {
                 refreshClaims();
                 loadProcessingSteps();
-            }, 7000);
+            }, 5000); // Update every 5 seconds for better real-time experience
+            
+            console.log('✅ Intelligent Claims Dashboard ready!');
         });
 
         // API calls
@@ -933,7 +961,7 @@
             }
         }
 
-        // Display claims in the grid
+        // Display claims in the grid with intelligent status handling
         function displayClaims(claims) {
             const container = document.getElementById('claimsContainer');
             
@@ -942,13 +970,17 @@
                 return;
             }
             
-            container.innerHTML = claims.map(claim => `
+            container.innerHTML = claims.map(claim => {
+                // Intelligent status mapping
+                const smartStatus = getSmartClaimStatus(claim);
+                
+                return `
                 <div class="claim-item">
                     <div class="claim-header">
                         <div class="claim-id">${claim.claimId}</div>
                         <div class="claim-amount">$${claim.amount}</div>
                         <div class="claim-date">${claim.submitted}</div>
-                        <div class="claim-status status-${claim.status.toLowerCase()}">${claim.status.toUpperCase()}</div>
+                        <div class="claim-status status-${smartStatus.class}">${smartStatus.display}</div>
                     </div>
                     
                     <div class="claim-details">
@@ -968,22 +1000,65 @@
                             <div class="detail-label">Last Update</div>
                             <div class="detail-value">${claim.lastUpdate || claim.submitted}</div>
                         </div>
+                        ${claim.workflow_results ? `
+                        <div class="detail-item">
+                            <div class="detail-label">Processing</div>
+                            <div class="detail-value">🧠 Hybrid Intelligence</div>
+                        </div>
+                        ` : ''}
                     </div>
                     
                     <div class="claim-actions">
-                        ${claim.status === 'submitted' ? `
-                            <button onclick="processClaim('${claim.claimId}')" class="process-btn">
-                                <i class="fas fa-play"></i>
-                                Process
-                            </button>
-                        ` : ''}
-                        <button onclick="viewClaimDetails('${claim.claimId}')" class="view-btn">
+                        <button class="process-btn" onclick="processClaim('${claim.claimId}')">
+                            <i class="fas fa-play"></i>
+                            ${smartStatus.action}
+                        </button>
+                        <button class="view-btn" onclick="viewClaimDetails('${claim.claimId}')">
                             <i class="fas fa-eye"></i>
                             View Details
                         </button>
                     </div>
-                </div>
-            `).join('');
+                </div>`;
+            }).join('');
+        }
+        
+        // Smart claim status mapping for intelligent orchestrator
+        function getSmartClaimStatus(claim) {
+            // Handle workflow_results from intelligent orchestrator
+            if (claim.workflow_results) {
+                const steps = claim.workflow_results.steps || [];
+                const completedSteps = steps.filter(step => step.status === 'completed').length;
+                const failedSteps = steps.filter(step => step.status === 'failed').length;
+                const totalSteps = steps.length;
+                
+                if (failedSteps > 0) {
+                    return { class: 'failed', display: 'FAILED', action: 'Retry' };
+                } else if (completedSteps === totalSteps && totalSteps > 0) {
+                    return { class: 'approved', display: 'APPROVED', action: 'Review' };
+                } else if (completedSteps > 0) {
+                    return { class: 'processing', display: 'PROCESSING', action: 'Continue' };
+                }
+            }
+            
+            // Handle traditional status
+            const status = claim.status ? claim.status.toLowerCase() : 'pending';
+            
+            switch (status) {
+                case 'completed':
+                case 'approved':
+                    return { class: 'approved', display: 'APPROVED', action: 'Review' };
+                case 'processing':
+                case 'in_progress':
+                    return { class: 'processing', display: 'PROCESSING', action: 'Continue' };
+                case 'failed':
+                case 'error':
+                case 'rejected':
+                    return { class: 'failed', display: 'FAILED', action: 'Retry' };
+                case 'pending':
+                case 'submitted':
+                default:
+                    return { class: 'pending', display: 'PENDING', action: 'Process' };
+            }
         }
 
         // Update overview statistics
@@ -999,11 +1074,16 @@
             document.getElementById('pendingClaims').textContent = pending;
         }
 
-        // Load processing steps
+        // Load processing steps with intelligent orchestrator support
         async function loadProcessingSteps() {
             try {
                 const response = await apiCall('/api/processing-steps');
-                const steps = response.steps || [];
+                let steps = response.steps || [];
+                
+                // Handle intelligent orchestrator workflow results
+                if (response.workflow_results && response.workflow_results.steps) {
+                    steps = transformIntelligentOrchestatorSteps(response.workflow_results.steps);
+                }
                 
                 displayProcessingSteps(steps);
                 
@@ -1014,7 +1094,49 @@
             }
         }
 
-        // Display processing steps
+        // Transform intelligent orchestrator steps to UI format
+        function transformIntelligentOrchestatorSteps(orchestratorSteps) {
+            return orchestratorSteps.map(step => {
+                const stepName = step.step.replace('_', ' ').toUpperCase();
+                const agentName = step.agent.replace('_', ' ').title();
+                
+                let description = '';
+                let statusIcon = 'info-circle';
+                let statusClass = 'process';
+                
+                if (step.status === 'completed') {
+                    description = `${stepName} completed successfully by ${agentName}`;
+                    statusIcon = 'check-circle';
+                    statusClass = 'complete';
+                } else if (step.status === 'skipped') {
+                    description = `${stepName} skipped - ${step.reason || 'Not required for this claim'}`;
+                    statusIcon = 'forward';
+                    statusClass = 'skipped';
+                } else if (step.status === 'failed') {
+                    description = `${stepName} failed - ${step.error || 'Unknown error'}`;
+                    statusIcon = 'exclamation-triangle';
+                    statusClass = 'error';
+                } else {
+                    description = `${stepName} in progress by ${agentName}`;
+                    statusIcon = 'spinner';
+                    statusClass = 'process';
+                }
+                
+                return {
+                    timestamp: new Date().toISOString(),
+                    title: stepName,
+                    description: description,
+                    agent_name: agentName,
+                    status: step.status,
+                    step_type: step.step,
+                    claim_id: step.claim_id || 'N/A',
+                    statusIcon: statusIcon,
+                    statusClass: statusClass
+                };
+            });
+        }
+
+        // Display processing steps with intelligent orchestrator support
         function displayProcessingSteps(steps) {
             const container = document.getElementById('activityLog');
             
@@ -1025,15 +1147,16 @@
             
             container.innerHTML = steps.map(step => `
                 <div class="activity-item">
-                    <div class="activity-icon activity-${getStepStatusClass(step.status)}">
-                        <i class="fas fa-${getStepIcon(step.step_type)}"></i>
+                    <div class="activity-icon activity-${step.statusClass || getStepStatusClass(step.status)}">
+                        <i class="fas fa-${step.statusIcon || getStepIcon(step.step_type)}"></i>
                     </div>
                     <div class="activity-time">${formatTime(step.timestamp)}</div>
                     <div class="activity-message">
                         <strong>${step.title || step.step_type.replace('_', ' ').toUpperCase()}:</strong> ${step.description}
-                        ${step.agent_name ? `<br><small>Agent: ${step.agent_name}</small>` : ''}
-                        ${step.details ? `<br><small>${step.details}</small>` : ''}
-                        ${step.claim_id ? `<br><small>Claim: ${step.claim_id}</small>` : ''}
+                        ${step.agent_name ? `<br><small>🤖 Agent: ${step.agent_name}</small>` : ''}
+                        ${step.details ? `<br><small>📋 ${step.details}</small>` : ''}
+                        ${step.claim_id ? `<br><small>🔍 Claim: ${step.claim_id}</small>` : ''}
+                        ${step.status === 'skipped' ? `<br><small>⚡ Hybrid Intelligence: Optimized workflow</small>` : ''}
                     </div>
                 </div>
             `).join('');
@@ -1052,13 +1175,14 @@
             return icons[stepType] || 'info-circle';
         }
 
-        // Get step status class
+        // Get step status class with intelligent orchestrator support
         function getStepStatusClass(status) {
             const classes = {
                 'started': 'process',
                 'completed': 'complete',
                 'failed': 'error',
-                'in_progress': 'process'
+                'in_progress': 'process',
+                'skipped': 'skipped'
             };
             return classes[status] || 'process';
         }
@@ -1269,14 +1393,23 @@
             } catch (error) {
                 console.error('Chat error:', error);
                 removeTypingIndicator();
-                addMessageToChat('error', `Sorry, I encountered an error: ${error.message}. Please check if the Claims Orchestrator is running and try again.`);
+                
+                // Provide user-friendly error message
+                let errorMessage = 'Sorry, I encountered an error. Please try again.';
+                if (error.message.includes('fetch')) {
+                    errorMessage = 'Connection error: Please check if the Claims Orchestrator is running and try again.';
+                } else if (error.message.includes('HTTP')) {
+                    errorMessage = 'Server error: The service might be temporarily unavailable. Please try again in a moment.';
+                }
+                
+                addMessageToChat('error', errorMessage);
                 
                 // Update connection status
                 updateConnectionStatus(false);
             } finally {
                 // Re-enable send button
                 sendBtn.disabled = false;
-                sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Send';
+                sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Send';                
                 input.focus();
             }
         }

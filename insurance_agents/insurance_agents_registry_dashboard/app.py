@@ -950,12 +950,28 @@ async def chat_with_orchestrator(chat_request: ChatMessage):
                 if response.status == 200:
                     result = await response.json()
                     
-                    # Extract response text from A2A response - improved parsing
+                    # Extract response text from A2A response - improved parsing for JSON-RPC wrapper
                     orchestrator_response = "I'm here to help! However, I couldn't process your request at the moment."
                     
                     if isinstance(result, dict):
-                        # First, try to get the response from artifacts or content
-                        if "artifacts" in result and result["artifacts"]:
+                        # Handle JSON-RPC wrapper format first (most common from orchestrator)
+                        if "result" in result and isinstance(result["result"], dict):
+                            json_rpc_result = result["result"]
+                            
+                            # Extract text from parts array structure
+                            if "parts" in json_rpc_result and isinstance(json_rpc_result["parts"], list):
+                                for part in json_rpc_result["parts"]:
+                                    if isinstance(part, dict) and part.get("kind") == "text" and "text" in part:
+                                        orchestrator_response = part["text"]
+                                        break
+                            # Fallback: check for direct message in result
+                            elif "message" in json_rpc_result:
+                                orchestrator_response = json_rpc_result["message"]
+                            elif isinstance(json_rpc_result, str):
+                                orchestrator_response = json_rpc_result
+                        
+                        # Handle other A2A response formats
+                        elif "artifacts" in result and result["artifacts"]:
                             # A2A response with artifacts
                             first_artifact = result["artifacts"][0]
                             if "content" in first_artifact:
@@ -980,8 +996,8 @@ async def chat_with_orchestrator(chat_request: ChatMessage):
                                 # This looks like an A2A response, try to extract meaningful content
                                 orchestrator_response = f"I processed your request about: '{chat_request.message}'. The system is working on it."
                             else:
-                                # Fallback: stringify the result if it contains useful info
-                                orchestrator_response = f"I received your request about: '{chat_request.message}'\n\nHere's what I found: {json.dumps(result, indent=2)}"
+                                # Fallback: Don't show raw JSON to user
+                                orchestrator_response = "I processed your request, but the response format was unexpected. Please try rephrasing your question."
                     elif isinstance(result, str):
                         # Direct string response
                         orchestrator_response = result
