@@ -21,7 +21,7 @@ from a2a.utils import new_agent_text_message, new_task, new_text_artifact
 from shared.agent_discovery import AgentDiscoveryService
 from shared.a2a_client import A2AClient
 from shared.mcp_chat_client import mcp_chat_client
-from shared.workflow_logger import workflow_logger
+from shared.workflow_logger import workflow_logger, WorkflowStepType, WorkflowStepStatus
 
 # Azure AI Foundry imports
 from azure.ai.projects import AIProjectClient
@@ -1453,7 +1453,7 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                         
                         # Then execute with direct workflow using AI recommendations
                         response = await self._execute_intelligent_direct_workflow(
-                            task_text, getattr(ctx, 'task_id', claim_id), routing_decision
+                            task_text, getattr(ctx, 'task_id', claim_id), routing_decision, claim_id, claim_data
                         )
                         
                         self.logger.info(f"🔄 Orchestrator got response: {str(response)[:200]}...")
@@ -1765,19 +1765,26 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                 ]
             }
     
-    async def _execute_intelligent_direct_workflow(self, task_text: str, session_id: str, routing_decision: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_intelligent_direct_workflow(self, task_text: str, session_id: str, routing_decision: Dict[str, Any], original_claim_id: str, original_claim_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute direct workflow with Azure AI routing intelligence
         """
         try:
             self.logger.info(f"⚡ Executing INTELLIGENT DIRECT workflow: {routing_decision['reasoning']}")
             
-            claim_data = {
-                "claim_id": f"CLAIM_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            # Use the original claim data instead of generating a new claim ID
+            claim_data = original_claim_data.copy()  # Make a copy to avoid modifying original
+            claim_data.update({
                 "initial_request": task_text,
                 "session_id": session_id,
                 "routing_intelligence": routing_decision['reasoning']
-            }
+            })
+            
+            # 🎯 WORKFLOW LOGGER: Start tracking this claim using ORIGINAL claim ID
+            claim_id = original_claim_id  # Use the original claim ID (e.g., "OP-1001")
+            print(f"🔍 DEBUG: Starting workflow logging for claim {claim_id}")
+            workflow_logger.start_claim_processing(claim_id)
+            print(f"🔍 DEBUG: Workflow logging started successfully for {claim_id}")
             
             workflow_results = {
                 "workflow_type": "intelligent_direct",
@@ -1787,6 +1794,22 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                 "status": "in_progress"
             }
             
+            # 🎯 WORKFLOW LOGGER: Log Azure AI routing decision  
+            print(f"🔍 DEBUG: Logging Azure AI routing decision...")
+            try:
+                workflow_logger.log_agent_selection(
+                    task_type="intelligent_routing", 
+                    selected_agent="azure_ai_foundry",
+                    agent_name="Azure AI GPT-4o",
+                    reasoning=routing_decision['reasoning'],
+                    alternatives=[]
+                )
+                print(f"🔍 DEBUG: Successfully logged Azure AI routing decision")
+            except Exception as e:
+                print(f"🔍 DEBUG: Failed to log Azure AI routing decision: {e}")
+                import traceback
+                traceback.print_exc()
+            
             # Execute steps based on AI routing decision
             for step in routing_decision["steps"]:
                 agent_name = step["agent"]
@@ -1795,6 +1818,21 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                 
                 if is_required and agent_name in self.available_agents:
                     self.logger.info(f"🎯 INTELLIGENT: Executing {agent_name} - {reason}")
+                    
+                    # 🎯 WORKFLOW LOGGER: Log task dispatch
+                    print(f"🔍 DEBUG: Logging task dispatch for {agent_name}...")
+                    try:
+                        agent_url = self.available_agents[agent_name].get("base_url", f"http://localhost:800{list(self.available_agents.keys()).index(agent_name) + 2}")
+                        dispatch_step_id = workflow_logger.log_task_dispatch(
+                            agent_name=agent_name,
+                            task_description=reason,
+                            agent_url=agent_url
+                        )
+                        print(f"🔍 DEBUG: Successfully logged task dispatch: {dispatch_step_id}")
+                    except Exception as e:
+                        print(f"🔍 DEBUG: Failed to log task dispatch: {e}")
+                        import traceback
+                        traceback.print_exc()
                     
                     try:
                         # Determine task type based on agent
@@ -1808,6 +1846,14 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                         
                         result = await self._route_to_agent(task_text, agent_name, task_type, session_id)
                         
+                        # 🎯 WORKFLOW LOGGER: Log successful agent response
+                        workflow_logger.log_agent_response(
+                            agent_name=agent_name,
+                            success=True,
+                            response_summary=f"Successfully completed {task_type}",
+                            response_details={"result": result} if isinstance(result, dict) else {"result": str(result)}
+                        )
+                        
                         workflow_results["steps"].append({
                             "step": agent_name,
                             "agent": agent_name,
@@ -1820,6 +1866,15 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                         
                     except Exception as step_error:
                         self.logger.error(f"❌ Error in {agent_name} step: {step_error}")
+                        
+                        # 🎯 WORKFLOW LOGGER: Log failed agent response  
+                        workflow_logger.log_agent_response(
+                            agent_name=agent_name,
+                            success=False,
+                            response_summary=f"Failed to complete {task_type}: {str(step_error)}",
+                            response_details={"error": str(step_error)}
+                        )
+                        
                         workflow_results["steps"].append({
                             "step": agent_name,
                             "agent": agent_name,
@@ -1830,6 +1885,17 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                         
                 elif not is_required:
                     self.logger.info(f"⏩ INTELLIGENT: Skipping {agent_name} - {reason}")
+                    
+                    # 🎯 WORKFLOW LOGGER: Log skipped step
+                    workflow_logger.add_step(
+                        step_type=WorkflowStepType.AGENT_SELECTION,
+                        title=f"⏩ Skipped {agent_name}",
+                        description=f"Azure AI determined {agent_name} is not needed: {reason}",
+                        status=WorkflowStepStatus.COMPLETED,
+                        agent_name=agent_name,
+                        agent_reasoning=reason
+                    )
+                    
                     workflow_results["steps"].append({
                         "step": agent_name,
                         "agent": agent_name, 
@@ -1838,6 +1904,13 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                     })
             
             workflow_results["status"] = "completed"
+            
+            # 🎯 WORKFLOW LOGGER: Log final completion
+            workflow_logger.log_completion(
+                claim_id=claim_id,
+                final_status="completed", 
+                processing_time_ms=1000  # Estimated processing time for fast intelligent routing
+            )
             
             # Create intelligent summary
             steps_summary = []

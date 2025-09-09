@@ -30,15 +30,115 @@ from dotenv import load_dotenv
 
 # Import shared modules
 try:
-    from shared.workflow_logger import workflow_logger
-except ImportError:
+    from shared.workflow_logger import workflow_logger, WorkflowStepType, WorkflowStepStatus
+    print("✅ Successfully imported real workflow_logger with enums")
+except ImportError as e:
+    print(f"⚠️ Failed to import real workflow_logger: {e}")
     # Create a mock workflow logger if import fails
     class MockWorkflowLogger:
         def get_workflow_steps(self, claim_id):
+            print(f"⚠️ MockWorkflowLogger: get_workflow_steps called for {claim_id}")
             return []
         def get_all_recent_steps(self, limit):
+            print(f"⚠️ MockWorkflowLogger: get_all_recent_steps called with limit {limit}")
             return []
     workflow_logger = MockWorkflowLogger()
+    # Mock enums for fallback
+    class WorkflowStepType:
+        DISCOVERY = "discovery"
+    class WorkflowStepStatus:
+        COMPLETED = "completed"
+
+# Active Processing State Management
+active_processing_sessions = {}  # Track which claims are being actively processed
+current_viewing_claim = None     # Track which claim's steps should be shown
+current_processing_claims = set()  # Track currently processing claims for real-time updates
+processing_steps_cache = {}  # Short-term memory cache for real-time steps
+
+def start_claim_processing_session(claim_id: str):
+    """Mark a claim as actively being processed"""
+    global active_processing_sessions, current_processing_claims, processing_steps_cache
+    active_processing_sessions[claim_id] = {
+        "start_time": datetime.now().isoformat(),
+        "status": "processing",
+        "session_id": str(uuid.uuid4())
+    }
+    current_processing_claims.add(claim_id)
+    # Clear any old cached steps for this claim to ensure fresh real-time data
+    processing_steps_cache[claim_id] = []
+    terminal_logger.log("INFO", "SESSION", f"✅ Started processing session for claim {claim_id}")
+    terminal_logger.log("DEBUG", "SESSION", f"   Active claims: {list(current_processing_claims)}")
+    terminal_logger.log("DEBUG", "SESSION", f"   Total sessions: {len(active_processing_sessions)}")
+
+def end_claim_processing_session(claim_id: str):
+    """Mark a claim processing as complete"""
+    global active_processing_sessions, current_processing_claims
+    if claim_id in active_processing_sessions:
+        active_processing_sessions[claim_id]["status"] = "completed"
+        active_processing_sessions[claim_id]["end_time"] = datetime.now().isoformat()
+    current_processing_claims.discard(claim_id)
+    # Keep steps in cache briefly for completed claims
+    terminal_logger.log("INFO", "SESSION", f"🏁 Ended processing session for claim {claim_id}")
+    terminal_logger.log("DEBUG", "SESSION", f"   Remaining active claims: {list(current_processing_claims)}")
+
+def is_claim_actively_processing(claim_id: str) -> bool:
+    """Check if a claim is currently being processed"""
+    result = claim_id in current_processing_claims
+    terminal_logger.log("DEBUG", "SESSION", f"   Is {claim_id} active? {result}")
+    return result
+
+def get_real_time_processing_steps(claim_id: str = None):
+    """Get real-time processing steps with proper claim filtering"""
+    terminal_logger.log("DEBUG", "STEPS", f"🔍 Getting real-time steps for claim: {claim_id or 'all'}")
+    terminal_logger.log("DEBUG", "STEPS", f"   Current processing claims: {list(current_processing_claims)}")
+    
+    # Force refresh from file to get latest data
+    workflow_logger._load_from_file()
+    
+    if claim_id and is_claim_actively_processing(claim_id):
+        # Get LIVE steps for specific actively processing claim
+        live_steps = workflow_logger.get_workflow_steps(claim_id)
+        processing_steps_cache[claim_id] = live_steps
+        terminal_logger.log("DEBUG", "STEPS", f"   Retrieved {len(live_steps)} steps for active claim {claim_id}")
+        return live_steps
+    elif claim_id:
+        # For specific claim, always try to get steps even if not actively processing
+        live_steps = workflow_logger.get_workflow_steps(claim_id)
+        if live_steps:
+            processing_steps_cache[claim_id] = live_steps
+            terminal_logger.log("DEBUG", "STEPS", f"   Retrieved {len(live_steps)} steps for claim {claim_id} (not actively processing)")
+            return live_steps
+        elif claim_id in processing_steps_cache:
+            # Return cached steps for recently completed claim
+            cached_steps = processing_steps_cache[claim_id]
+            terminal_logger.log("DEBUG", "STEPS", f"   Retrieved {len(cached_steps)} cached steps for completed claim {claim_id}")
+            return cached_steps
+    else:
+        # Get steps for any actively processing claims, or recent claims
+        all_active_steps = []
+        
+        # First, get steps for actively processing claims
+        for active_claim_id in current_processing_claims:
+            claim_steps = workflow_logger.get_workflow_steps(active_claim_id)
+            # Filter to only this specific claim's steps
+            filtered_steps = [step for step in claim_steps if hasattr(step, 'claim_id') and step.claim_id == active_claim_id]
+            processing_steps_cache[active_claim_id] = filtered_steps
+            all_active_steps.extend(filtered_steps)
+            terminal_logger.log("DEBUG", "STEPS", f"   Retrieved {len(filtered_steps)} steps for active claim {active_claim_id}")
+        
+        # If no active claims, show recent steps from any claims that have steps
+        if not all_active_steps and not current_processing_claims:
+            recent_steps = workflow_logger.get_all_recent_steps(limit=20)
+            if recent_steps:
+                all_active_steps = recent_steps[:10]  # Show last 10 steps
+                terminal_logger.log("DEBUG", "STEPS", f"   No active claims, retrieved {len(all_active_steps)} recent steps")
+        
+        terminal_logger.log("DEBUG", "STEPS", f"   Total active steps across all claims: {len(all_active_steps)}")
+        return all_active_steps
+
+def get_active_processing_steps(claim_id: str = None):
+    """Get workflow steps only for actively processing claims (enhanced with real-time)"""
+    return get_real_time_processing_steps(claim_id)
 
 # Load environment variables
 load_dotenv()
@@ -504,10 +604,16 @@ async def get_agent_card(agent_id: str):
 
 @app.post("/api/claims/{claim_id}/process")
 async def process_claim(claim_id: str, request: ProcessingRequest, background_tasks: BackgroundTasks):
-    """Start claim processing"""
+    """Start claim processing with integrated session management"""
     if claim_id not in active_claims:
         terminal_logger.log("ERROR", "API", f"Cannot process - claim not found: {claim_id}")
         raise HTTPException(status_code=404, detail="Claim not found")
+    
+    # STEP 1: Start processing session for real-time steps tracking
+    terminal_logger.log("INFO", "PROCESS", f"🚀 AUTO-STARTING processing session for claim: {claim_id}")
+    start_claim_processing_session(claim_id)
+    global current_viewing_claim
+    current_viewing_claim = claim_id
     
     # Update claim status
     active_claims[claim_id].status = "processing"
@@ -517,9 +623,34 @@ async def process_claim(claim_id: str, request: ProcessingRequest, background_ta
     terminal_logger.log("CLAIM", "PROCESS", f"Started processing claim: {claim_id} by employee: {request.employeeId}")
     
     # Start background processing simulation
-    background_tasks.add_task(simulate_claim_processing, claim_id)
+    background_tasks.add_task(simulate_claim_processing_with_session, claim_id)
     
     return {"message": f"Processing started for claim {claim_id}", "status": "processing"}
+
+async def simulate_claim_processing_with_session(claim_id: str):
+    """Enhanced background processing with session cleanup"""
+    try:
+        # Call the original processing simulation
+        await simulate_claim_processing(claim_id)
+        
+        # Wait a bit longer for all workflow steps to complete
+        await asyncio.sleep(5)
+        
+        # STEP 2: Auto-stop processing session after workflow completion
+        terminal_logger.log("INFO", "PROCESS", f"🏁 AUTO-STOPPING processing session for claim: {claim_id}")
+        end_claim_processing_session(claim_id)
+        
+        # Clear viewing claim if it matches
+        global current_viewing_claim
+        if current_viewing_claim == claim_id:
+            current_viewing_claim = None
+            
+        terminal_logger.log("SUCCESS", "PROCESS", f"✅ Completed processing with session cleanup for claim: {claim_id}")
+        
+    except Exception as e:
+        terminal_logger.log("ERROR", "PROCESS", f"❌ Error in processing with session for {claim_id}: {str(e)}")
+        # Ensure session cleanup on error
+        end_claim_processing_session(claim_id)
 
 @app.get("/api/logs")
 async def get_processing_logs():
@@ -615,30 +746,182 @@ async def get_live_processing_steps():
 @app.get("/api/processing-steps/{claim_id}")
 async def get_processing_steps(claim_id: str):
     """Get processing steps for a specific claim"""
-    # First try to get from live steps
-    claim_steps = [step for step in live_workflow_steps if step.get('claim_id') == claim_id]
-    
-    if claim_steps:
-        return {"claim_id": claim_id, "steps": claim_steps}
-    
-    # Fallback to workflow logger
-    steps = workflow_logger.get_workflow_steps(claim_id)
-    return {"claim_id": claim_id, "steps": steps}
+    try:
+        # First try to get real workflow steps from orchestrator
+        real_steps = workflow_logger.get_workflow_steps(claim_id)
+        if real_steps:
+            terminal_logger.log("DEBUG", "API", f"Returning {len(real_steps)} real workflow steps for claim {claim_id}")
+            return {"claim_id": claim_id, "steps": real_steps}
+        
+        # Fallback to live steps for backward compatibility
+        claim_steps = [step for step in live_workflow_steps if step.get('claim_id') == claim_id]
+        if claim_steps:
+            terminal_logger.log("DEBUG", "API", f"Returning {len(claim_steps)} live workflow steps for claim {claim_id}")
+            return {"claim_id": claim_id, "steps": claim_steps}
+        
+        terminal_logger.log("WARNING", "API", f"No workflow steps found for claim {claim_id}")
+        return {"claim_id": claim_id, "steps": []}
+        
+    except Exception as e:
+        terminal_logger.log("ERROR", "API", f"Error getting workflow steps for {claim_id}: {str(e)}")
+        return {"claim_id": claim_id, "steps": []}
 
 @app.get("/api/processing-steps") 
 async def get_all_processing_steps():
-    """Get recent processing steps across all claims"""
-    # Return live steps (most recent 20)
-    return {"steps": live_workflow_steps[-20:] if live_workflow_steps else []}
+    """Get real-time processing steps for actively processing claims"""
+    try:
+        terminal_logger.log("DEBUG", "API", "🔍 Processing steps API called")
+        terminal_logger.log("DEBUG", "API", f"   Current processing claims: {list(current_processing_claims)}")
+        terminal_logger.log("DEBUG", "API", f"   Active sessions count: {len(current_processing_claims)}")
+        
+        # Get real-time steps with proper claim filtering
+        active_steps = get_real_time_processing_steps()
+        active_sessions_count = len(current_processing_claims)
+        
+        terminal_logger.log("DEBUG", "API", f"   Retrieved {len(active_steps)} active steps")
+        
+        if active_steps:
+            # Convert step objects to dictionaries for JSON response
+            steps_data = []
+            for step in active_steps:
+                if hasattr(step, 'to_dict'):
+                    # WorkflowStep object
+                    step_dict = step.to_dict()
+                else:
+                    # Already a dictionary
+                    step_dict = step
+                
+                # Fix the details display issue
+                if isinstance(step_dict.get('details'), dict):
+                    # Convert complex objects to readable strings
+                    details_str = []
+                    for key, value in step_dict['details'].items():
+                        if isinstance(value, (list, dict)):
+                            details_str.append(f"{key}: {str(value)}")
+                        else:
+                            details_str.append(f"{key}: {value}")
+                    step_dict['details_display'] = "; ".join(details_str)
+                else:
+                    step_dict['details_display'] = str(step_dict.get('details', ''))
+                
+                steps_data.append(step_dict)
+            
+            terminal_logger.log("DEBUG", "API", f"✅ Returning {len(steps_data)} real-time steps for {active_sessions_count} active claims")
+            
+            return {
+                "steps": steps_data,
+                "active_sessions": active_sessions_count,
+                "processing_claims": list(current_processing_claims)
+            }
+        else:
+            terminal_logger.log("DEBUG", "API", f"❌ No active processing steps (active claims: {active_sessions_count})")
+            return {
+                "steps": [],
+                "active_sessions": active_sessions_count,
+                "processing_claims": list(current_processing_claims)
+            }
+            
+    except Exception as e:
+        terminal_logger.log("ERROR", "API", f"❌ Error getting real-time processing steps: {str(e)}")
+        import traceback
+        terminal_logger.log("ERROR", "API", f"   Traceback: {traceback.format_exc()}")
+        return {
+            "steps": [],
+            "active_sessions": 0,
+            "processing_claims": [],
+            "error": str(e)
+        }
 
-@app.get("/api/debug-steps") 
-async def debug_processing_steps():
-    """Debug endpoint to check the current state of workflow steps"""
+@app.post("/api/start-processing/{claim_id}")
+async def start_processing_claim(claim_id: str):
+    """Start processing a specific claim and show its steps"""
+    try:
+        global current_viewing_claim
+        terminal_logger.log("INFO", "PROCESSING", f"🚀 Starting processing session for claim: {claim_id}")
+        
+        start_claim_processing_session(claim_id)
+        current_viewing_claim = claim_id
+        
+        terminal_logger.log("INFO", "PROCESSING", f"✅ Session started for claim {claim_id}")
+        terminal_logger.log("DEBUG", "PROCESSING", f"   Current processing claims: {list(current_processing_claims)}")
+        terminal_logger.log("DEBUG", "PROCESSING", f"   Active sessions: {len(current_processing_claims)}")
+        
+        return {
+            "status": "success",
+            "message": f"Started processing claim {claim_id}",
+            "claim_id": claim_id,
+            "session_active": True
+        }
+    except Exception as e:
+        terminal_logger.log("ERROR", "PROCESSING", f"❌ Error starting processing for {claim_id}: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/stop-processing/{claim_id}")
+async def stop_processing_claim(claim_id: str):
+    """Stop processing a specific claim and clear its steps"""
+    try:
+        global current_viewing_claim
+        end_claim_processing_session(claim_id)
+        
+        if current_viewing_claim == claim_id:
+            current_viewing_claim = None
+            
+        terminal_logger.log("INFO", "PROCESSING", f"Stopped processing for claim {claim_id}")
+        return {
+            "status": "success", 
+            "message": f"Stopped processing claim {claim_id}",
+            "claim_id": claim_id,
+            "session_active": False
+        }
+    except Exception as e:
+        terminal_logger.log("ERROR", "PROCESSING", f"Error stopping processing for {claim_id}: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/processing-status")
+async def get_processing_status():
+    """Get current processing status and active sessions"""
     return {
-        "total_steps": len(live_workflow_steps),
-        "all_steps": live_workflow_steps,
-        "recent_20": live_workflow_steps[-20:] if live_workflow_steps else []
+        "active_sessions": active_processing_sessions,
+        "current_viewing_claim": current_viewing_claim,
+        "sessions_count": len([s for s in active_processing_sessions.values() if s["status"] == "processing"])
     }
+
+@app.get("/api/debug-workflow-connection")
+async def debug_workflow_connection():
+    """Debug endpoint to verify real workflow logger connection"""
+    try:
+        # Test workflow logger functionality  
+        test_claim_id = f"TEST_{datetime.now().strftime('%H%M%S')}"
+        workflow_logger.start_claim_processing(test_claim_id)
+        
+        step_id = workflow_logger.add_step(
+            step_type=WorkflowStepType.DISCOVERY,  # Need to import this
+            title="🧪 Connection Test",
+            description="Testing dashboard connection to real workflow logger",
+            status=WorkflowStepStatus.COMPLETED
+        )
+        
+        # Get the test step back
+        test_steps = workflow_logger.get_workflow_steps(test_claim_id)
+        all_recent = workflow_logger.get_all_recent_steps(5)
+        
+        return {
+            "connection_status": "SUCCESS",
+            "workflow_logger_type": type(workflow_logger).__name__,
+            "test_claim_id": test_claim_id,
+            "test_step_created": step_id,
+            "test_steps_retrieved": len(test_steps),
+            "recent_steps_available": len(all_recent),
+            "sample_test_step": test_steps[0] if test_steps else None,
+            "storage_file_exists": str(workflow_logger.storage_file.exists()),
+            "storage_file_path": str(workflow_logger.storage_file)
+        }
+    except Exception as e:
+        return {
+            "connection_status": "ERROR",
+            "error": str(e),
+            "workflow_logger_type": type(workflow_logger).__name__,
+        }
 
 async def simulate_claim_processing(claim_id: str):
     """Process claim using REAL A2A agents instead of simulation"""
@@ -724,97 +1007,9 @@ async def simulate_claim_processing(claim_id: str):
                     terminal_logger.log("SUCCESS", "AGENT", f"Successfully sent claim {claim_id} to orchestrator")
                     terminal_logger.log("AGENT", "RESPONSE", f"Orchestrator processing claim {claim_id}")
                     
-                    # Generate workflow steps based on standard orchestrator process
-                    workflow_steps = [
-                        {
-                            'id': 'step_001',
-                            'claim_id': claim_id,
-                            'title': '🔍 Agent Discovery',
-                            'description': 'Starting agent discovery process...',
-                            'status': 'completed',
-                            'timestamp': datetime.now().isoformat(),
-                            'step_type': 'discovery'
-                        },
-                        {
-                            'id': 'step_002',
-                            'claim_id': claim_id,
-                            'title': '✅ Discovery Complete',
-                            'description': 'Found 3 agents online (intake_clarifier, document_intelligence, coverage_rules_engine)',
-                            'status': 'completed',
-                            'timestamp': datetime.now().isoformat(),
-                            'step_type': 'discovery'
-                        },
-                        {
-                            'id': 'step_003',
-                            'claim_id': claim_id,
-                            'title': '📋 Data Check',
-                            'description': 'Checking existing claim data in database',
-                            'status': 'completed',
-                            'timestamp': datetime.now().isoformat(),
-                            'step_type': 'validation'
-                        },
-                        {
-                            'id': 'step_004',
-                            'claim_id': claim_id,
-                            'title': '📝 Intake Task',
-                            'description': 'Starting intake clarification process',
-                            'status': 'completed',
-                            'timestamp': datetime.now().isoformat(),
-                            'step_type': 'processing'
-                        },
-                        {
-                            'id': 'step_005',
-                            'claim_id': claim_id,
-                            'title': '🎯 Agent Selection',
-                            'description': 'Selected intake_clarifier for claim_validation',
-                            'status': 'completed',
-                            'timestamp': datetime.now().isoformat(),
-                            'step_type': 'selection'
-                        },
-                        {
-                            'id': 'step_006',
-                            'claim_id': claim_id,
-                            'title': '📤 Task Dispatch',
-                            'description': 'Dispatching task to intake_clarifier',
-                            'status': 'completed',
-                            'timestamp': datetime.now().isoformat(),
-                            'step_type': 'dispatch'
-                        },
-                        {
-                            'id': 'step_007',
-                            'claim_id': claim_id,
-                            'title': '✅ Task Success',
-                            'description': 'intake_clarifier completed task successfully',
-                            'status': 'completed',
-                            'timestamp': datetime.now().isoformat(),
-                            'step_type': 'completion'
-                        },
-                        {
-                            'id': 'step_008',
-                            'claim_id': claim_id,
-                            'title': '⚖️ Coverage Task',
-                            'description': 'Starting coverage validation process',
-                            'status': 'completed',
-                            'timestamp': datetime.now().isoformat(),
-                            'step_type': 'processing'
-                        },
-                        {
-                            'id': 'step_009',
-                            'claim_id': claim_id,
-                            'title': '🎯 Final Decision',
-                            'description': 'Analyzing results for final decision',
-                            'status': 'completed',
-                            'timestamp': datetime.now().isoformat(),
-                            'step_type': 'decision'
-                        }
-                    ]
-                    
-                    # Add all steps to live workflow steps
-                    live_workflow_steps.extend(workflow_steps)
-                    
-                    # Keep only last 100 steps
-                    while len(live_workflow_steps) > 100:
-                        live_workflow_steps.pop(0)
+                    # IMPORTANT: No longer generate fake workflow steps here!
+                    # The real workflow steps are captured by the orchestrator's workflow_logger
+                    # and served through the workflow_logger.get_all_recent_steps() API
                     
                     try:
                         # Parse the actual response from the enhanced orchestrator
@@ -844,28 +1039,7 @@ async def simulate_claim_processing(claim_id: str):
                         terminal_logger.log("REASONING", "DECISION", f"Reasoning: {reasoning}")
                         terminal_logger.log("CONFIDENCE", "DECISION", f"Confidence: {confidence:.0%}")
                         
-                        # Add final decision step with actual result
-                        final_step = {
-                            'id': 'step_010',
-                            'claim_id': claim_id,
-                            'title': '✅ Decision Made',
-                            'description': f'Decision: {decision.upper()} - {reasoning}',
-                            'status': 'completed',
-                            'timestamp': datetime.now().isoformat(),
-                            'step_type': 'decision'
-                        }
-                        live_workflow_steps.append(final_step)
-                        
-                        completion_step = {
-                            'id': 'step_011',
-                            'claim_id': claim_id,
-                            'title': '🎉 Complete',
-                            'description': f'Claim {claim_id} processing completed successfully',
-                            'status': 'completed',
-                            'timestamp': datetime.now().isoformat(),
-                            'step_type': 'completion'
-                        }
-                        live_workflow_steps.append(completion_step)
+                        # No longer add hardcoded final steps - use real workflow logger data!
                         
                         # Log processing steps if available
                         processing_steps = result.get('processing_steps', [])

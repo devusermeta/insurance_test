@@ -56,10 +56,14 @@ class WorkflowLogger:
         self.workflow_steps: Dict[str, List[WorkflowStep]] = {}
         self.current_claim: Optional[str] = None
         self.step_counter = 0
-        self.dashboard_url = "http://localhost:5000"  # Dashboard webhook URL
+        self.dashboard_url = "http://localhost:3000"  # Dashboard webhook URL (Fixed port!)
         
-        # Set up persistent storage
-        self.storage_dir = Path("workflow_logs")
+        # Set up persistent storage with absolute path
+        # Find the insurance root directory (where workflow_logs should be)
+        current_file = Path(__file__).resolve()
+        # Go up from shared/workflow_logger.py -> shared -> insurance_agents -> insurance
+        insurance_root = current_file.parent.parent.parent
+        self.storage_dir = insurance_root / "workflow_logs" 
         self.storage_dir.mkdir(exist_ok=True)
         self.storage_file = self.storage_dir / "workflow_steps.json"
         
@@ -80,7 +84,7 @@ class WorkflowLogger:
         """Load workflow steps from persistent storage"""
         try:
             if self.storage_file.exists():
-                with open(self.storage_file, 'r', encoding='utf-8') as f:
+                with open(self.storage_file, 'r', encoding='utf-8', errors='ignore') as f:
                     data = json.load(f)
                     
                     # Convert back to WorkflowStep objects

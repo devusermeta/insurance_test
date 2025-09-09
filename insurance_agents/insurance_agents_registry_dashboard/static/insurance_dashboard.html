@@ -357,6 +357,93 @@
             color: #333;
         }
 
+        /* Processing Steps */
+        .processing-step {
+            padding: 0.75rem;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 0.9rem;
+            transition: background-color 0.3s ease;
+        }
+
+        .processing-step:last-child {
+            border-bottom: none;
+        }
+
+        .processing-step.completed {
+            background-color: #e8f5e8;
+        }
+
+        .processing-step.active {
+            background-color: #fff3cd;
+            animation: pulse-bg 2s infinite;
+        }
+
+        .processing-step.failed {
+            background-color: #f8d7da;
+        }
+
+        @keyframes pulse-bg {
+            0% { background-color: #fff3cd; }
+            50% { background-color: #ffeaa7; }
+            100% { background-color: #fff3cd; }
+        }
+
+        .step-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            flex-shrink: 0;
+        }
+
+        .step-icon.completed {
+            background: #4caf50;
+            color: white;
+        }
+
+        .step-icon.active {
+            background: #ff9800;
+            color: white;
+            animation: pulse 2s infinite;
+        }
+
+        .step-icon.pending {
+            background: #e0e0e0;
+            color: #666;
+        }
+
+        .step-icon.failed {
+            background: #f44336;
+            color: white;
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        .step-title {
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 0.25rem;
+        }
+
+        .step-timestamp {
+            font-size: 0.8rem;
+            color: #666;
+        }
+
+        .step-details {
+            font-size: 0.8rem;
+            color: #888;
+            margin-top: 0.25rem;
+        }
+
         /* Responsive Design */
         @media (max-width: 1024px) {
             .main-content {
@@ -489,6 +576,23 @@
                 </div>
             </div>
 
+            <!-- Processing Steps -->
+            <div class="card" id="processing-steps-card" style="display: none;">
+                <div class="card-header">
+                    <h3 class="card-title">
+                        <i class="fas fa-tasks"></i>
+                        Processing Steps
+                    </h3>
+                    <div id="processing-indicator" class="status-indicator" style="background: #fff3cd; color: #856404;">
+                        <div class="loading" style="width: 12px; height: 12px; border-width: 2px;"></div>
+                        <span>Processing...</span>
+                    </div>
+                </div>
+                <div id="processing-steps-list">
+                    <!-- Processing steps will be populated here -->
+                </div>
+            </div>
+
             <!-- Activity Log -->
             <div class="card">
                 <div class="card-header">
@@ -513,20 +617,29 @@
         // Initialize dashboard
         document.addEventListener('DOMContentLoaded', function() {
             console.log('🖥️ Insurance Claims Dashboard initializing...');
+            
+            // Clear any existing processing sessions on page load
+            clearAllProcessingSessions();
+            
             loadClaims();
             loadAgents();
             loadActivityLogs();
+            loadProcessingSteps(); // This should now return empty steps
             
             // Auto-refresh every 7 seconds for real-time updates
             setInterval(() => {
                 refreshClaims();
                 loadAgents();  // Added to refresh agent status too
                 loadActivityLogs();
+                loadProcessingSteps(); // Keep checking for active processing steps
             }, 7000);
         });
 
-        // API calls
+        // API calls with debugging
         async function apiCall(endpoint, options = {}) {
+            const startTime = Date.now();
+            console.log(`📡 API CALL: ${endpoint}`, options);
+            
             try {
                 const response = await fetch(`/api${endpoint}`, {
                     headers: {
@@ -536,13 +649,19 @@
                     ...options
                 });
                 
+                const duration = Date.now() - startTime;
+                console.log(`📡 API RESPONSE: ${endpoint} (${response.status}) - ${duration}ms`);
+                
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
-                return await response.json();
+                const data = await response.json();
+                console.log(`📡 API DATA: ${endpoint}`, data);
+                return data;
             } catch (error) {
-                console.error('API call failed:', error);
+                const duration = Date.now() - startTime;
+                console.error(`📡 API ERROR: ${endpoint} - ${duration}ms`, error);
                 return null;
             }
         }
@@ -677,37 +796,152 @@
             `).join('');
         }
 
-        // Process claim
+        // Simplified process claim - backend handles session management automatically
         async function processClaim(claimId, event) {
             event.stopPropagation();
+            
+            console.log(`🚀 Starting processClaim for: ${claimId}`);
             
             const button = event.target.closest('button');
             const originalText = button.innerHTML;
             button.innerHTML = '<div class="loading"></div> Processing...';
             button.disabled = true;
 
-            const requestData = {
-                claimId: claimId,
-                expectedOutput: "text confirmation then rules evaluation",
-                priority: "normal",
-                employeeId: "emp_001"
-            };
+            try {
+                // Step 1: Start the processing session to show steps in UI
+                console.log(`� Step 1: Starting processing session for claim: ${claimId}`);
+                button.innerHTML = '<div class="loading"></div> Initializing...';
+                
+                const sessionResult = await apiCall(`/start-processing/${claimId}`, {
+                    method: 'POST'
+                });
+                
+                console.log('📝 Session result:', sessionResult);
+                
+                if (!sessionResult) {
+                    throw new Error('Failed to start processing session');
+                }
+                
+                // Step 2: Immediately show processing steps card and start real-time updates
+                console.log('📝 Step 2: Loading initial processing steps...');
+                await loadProcessingSteps();
+                
+                // Step 3: Start the actual claim processing
+                console.log('📝 Step 3: Starting actual claim processing...');
+                button.innerHTML = '<div class="loading"></div> Processing...';
+                
+                const requestData = {
+                    claimId: claimId,
+                    expectedOutput: "text confirmation then rules evaluation",
+                    priority: "normal",
+                    employeeId: "emp_001"
+                };
 
-            const result = await apiCall(`/claims/${claimId}/process`, {
-                method: 'POST',
-                body: JSON.stringify(requestData)
-            });
+                console.log('📝 Processing request data:', requestData);
+                
+                const result = await apiCall(`/claims/${claimId}/process`, {
+                    method: 'POST',
+                    body: JSON.stringify(requestData)
+                });
 
-            if (result) {
-                console.log(`✅ Started processing claim: ${claimId}`);
+                console.log('📝 Processing result:', result);
+
+                if (result) {
+                    console.log(`✅ Started processing claim: ${claimId}`);
+                    button.innerHTML = '<div class="loading"></div> In Progress...';
+                    
+                    // Step 4: Start aggressive real-time updates during processing
+                    console.log('📝 Step 4: Starting real-time updates...');
+                    let updateCount = 0;
+                    const updateInterval = setInterval(async () => {
+                        updateCount++;
+                        console.log(`🔄 Real-time update #${updateCount} for ${claimId}`);
+                        await loadProcessingSteps();
+                        await loadActivityLogs(); // Also refresh activity logs
+                    }, 2000); // Update every 2 seconds during processing
+                    
+                    // Step 5: Wait for processing to complete, then clean up
+                    setTimeout(async () => {
+                        console.log('📝 Step 5: Processing timeout reached, cleaning up...');
+                        clearInterval(updateInterval); // Stop aggressive updates
+                        
+                        console.log(`🏁 Stopping processing session for claim: ${claimId}`);
+                        await apiCall(`/stop-processing/${claimId}`, {
+                            method: 'POST'
+                        });
+                        
+                        // Final updates
+                        console.log('📝 Final updates...');
+                        await loadClaims();
+                        await loadActivityLogs();
+                        await loadProcessingSteps(); // This should hide the steps card
+                        
+                        // Reset button
+                        button.innerHTML = '<i class="fas fa-check"></i> Completed';
+                        setTimeout(() => {
+                            button.innerHTML = originalText;
+                            button.disabled = false;
+                            console.log(`✅ Processing complete for ${claimId}`);
+                        }, 2000);
+                        
+                    }, 15000); // Wait 15 seconds for processing to complete
+                    
+                } else {
+                    // If processing failed, stop the session
+                    await apiCall(`/stop-processing/${claimId}`, {
+                        method: 'POST'
+                    });
+                    throw new Error('Failed to process claim');
+                }
+                
+            } catch (error) {
+                console.error(`❌ Error processing claim ${claimId}:`, error);
+                button.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Failed';
+                
+                // Reset button after showing error
                 setTimeout(() => {
-                    loadClaims();
-                    loadActivityLogs();
-                }, 1000);
-            } else {
-                console.error(`❌ Failed to process claim: ${claimId}`);
-                button.innerHTML = originalText;
-                button.disabled = false;
+                    button.innerHTML = originalText;
+                    button.disabled = false;
+                }, 3000);
+                
+                // Make sure to stop the session on error
+                await apiCall(`/stop-processing/${claimId}`, {
+                    method: 'POST'
+                });
+                
+                // Hide processing steps on error
+                await loadProcessingSteps();
+            }
+        }
+
+        // Error handling
+        window.addEventListener('error', function(event) {
+            console.error('Dashboard error:', event.error);
+        });
+
+        // Clear all processing sessions on page load
+        async function clearAllProcessingSessions() {
+            try {
+                console.log('🧹 Clearing all processing sessions...');
+                
+                // Get current processing status
+                const status = await apiCall('/processing-status');
+                
+                if (status && status.active_sessions) {
+                    // Stop all active sessions
+                    for (const claimId of Object.keys(status.active_sessions)) {
+                        if (status.active_sessions[claimId].status === 'processing') {
+                            console.log(`🛑 Stopping session for claim: ${claimId}`);
+                            await apiCall(`/stop-processing/${claimId}`, {
+                                method: 'POST'
+                            });
+                        }
+                    }
+                }
+                
+                console.log('✅ All processing sessions cleared');
+            } catch (error) {
+                console.error('❌ Error clearing processing sessions:', error);
             }
         }
 
@@ -750,10 +984,159 @@
             }
         }
 
-        // Error handling
-        window.addEventListener('error', function(event) {
-            console.error('Dashboard error:', event.error);
-        });
+        // Load processing steps with enhanced debugging and visual feedback
+        async function loadProcessingSteps() {
+            try {
+                console.log('🔍 loadProcessingSteps() called');
+                
+                // Add visual loading indicator
+                const processingCard = document.getElementById('processing-steps-card');
+                const stepsList = document.getElementById('processing-steps-list');
+                
+                // Show loading state
+                if (processingCard.style.display !== 'none') {
+                    stepsList.innerHTML = `
+                        <div style="text-align: center; padding: 2rem; color: #666;">
+                            <div class="loading" style="margin: 0 auto 1rem;"></div>
+                            <div>Loading processing steps...</div>
+                        </div>
+                    `;
+                }
+                
+                console.log('📡 Making API call to /api/processing-steps');
+                const data = await apiCall('/processing-steps');
+                console.log('📡 API Response:', data);
+                
+                if (data && data.steps && data.steps.length > 0 && data.active_sessions > 0) {
+                    console.log(`✅ Showing ${data.steps.length} steps for ${data.active_sessions} active sessions`);
+                    
+                    // Show processing steps card ONLY when there are active sessions
+                    processingCard.style.display = 'block';
+                    
+                    // Update processing indicator based on active sessions
+                    const processingIndicator = document.getElementById('processing-indicator');
+                    const activeClaims = data.processing_claims || [];
+                    
+                    if (data.active_sessions > 0) {
+                        processingIndicator.innerHTML = `
+                            <div class="loading" style="width: 12px; height: 12px; border-width: 2px;"></div>
+                            <span>Processing ${activeClaims.length > 0 ? activeClaims.join(', ') : 'Active'} (${data.active_sessions} claims)</span>
+                        `;
+                        processingIndicator.style.background = '#fff3cd';
+                        processingIndicator.style.color = '#856404';
+                        console.log(`🔄 Active processing indicator shown for claims: ${activeClaims}`);
+                    } else {
+                        processingIndicator.innerHTML = `
+                            <i class="fas fa-check-circle"></i>
+                            <span>Processing Complete</span>
+                        `;
+                        processingIndicator.style.background = '#d4edda';
+                        processingIndicator.style.color = '#155724';
+                        console.log('✅ Processing complete indicator shown');
+                    }
+                    
+                    renderProcessingStepsEnhanced(data.steps, data.active_sessions > 0);
+                } else {
+                    console.log(`❌ Hiding processing card - Steps: ${data?.steps?.length || 0}, Active: ${data?.active_sessions || 0}`);
+                    // Hide processing steps card when no active processing
+                    processingCard.style.display = 'none';
+                }
+            } catch (error) {
+                console.error('❌ Error loading processing steps:', error);
+                // Show error in processing card if it's visible
+                const processingCard = document.getElementById('processing-steps-card');
+                const stepsList = document.getElementById('processing-steps-list');
+                
+                if (processingCard.style.display !== 'none') {
+                    stepsList.innerHTML = `
+                        <div style="text-align: center; padding: 2rem; color: #f44336;">
+                            <i class="fas fa-exclamation-triangle" style="font-size: 2rem; margin-bottom: 1rem;"></i>
+                            <div>Error loading processing steps</div>
+                            <div style="font-size: 0.8rem; margin-top: 0.5rem;">${error.message}</div>
+                        </div>
+                    `;
+                } else {
+                    // Hide card on error if it wasn't visible
+                    processingCard.style.display = 'none';
+                }
+            }
+        }
+
+        // Enhanced render processing steps with better data handling
+        function renderProcessingStepsEnhanced(steps, isActiveProcessing) {
+            const stepsList = document.getElementById('processing-steps-list');
+            
+            stepsList.innerHTML = steps.map((step, index) => {
+                // Determine step status
+                let stepStatus = 'pending';
+                let iconContent = index + 1;
+                
+                if (step.completed_at || step.status === 'completed') {
+                    stepStatus = step.status === 'failed' ? 'failed' : 'completed';
+                    iconContent = step.status === 'failed' ? '✕' : '✓';
+                } else if (isActiveProcessing && index === steps.length - 1) {
+                    // Last step is active if processing is ongoing
+                    stepStatus = 'active';
+                    iconContent = '⟳';
+                } else if (step.started_at || step.status === 'in_progress') {
+                    stepStatus = 'active';
+                    iconContent = '⟳';
+                }
+                
+                // Handle details display properly (fix [object Object] issue)
+                let detailsDisplay = '';
+                if (step.details_display) {
+                    detailsDisplay = step.details_display;
+                } else if (step.details && typeof step.details === 'object') {
+                    // Convert object to readable string
+                    const detailParts = [];
+                    for (const [key, value] of Object.entries(step.details)) {
+                        if (key !== 'task_type') { // Skip redundant fields
+                            detailParts.push(`${key}: ${value}`);
+                        }
+                    }
+                    detailsDisplay = detailParts.join(', ');
+                } else if (step.details) {
+                    detailsDisplay = String(step.details);
+                }
+                
+                return `
+                    <div class="processing-step ${stepStatus}">
+                        <div class="step-icon ${stepStatus}">${iconContent}</div>
+                        <div class="step-content">
+                            <div class="step-title">${step.title || `Step ${index + 1}`}</div>
+                            <div class="step-timestamp">
+                                ${step.timestamp ? 
+                                    `${formatDateTime(step.timestamp)}` : 
+                                    step.started_at ? `Started: ${formatDateTime(step.started_at)}` :
+                                    'Pending'
+                                }
+                                ${step.completed_at ? 
+                                    ` | Completed: ${formatDateTime(step.completed_at)}` : 
+                                    ''
+                                }
+                            </div>
+                            ${step.description ? 
+                                `<div class="step-details">${step.description}</div>` : 
+                                ''
+                            }
+                            ${step.agent_name ? 
+                                `<div class="step-details">🤖 Agent: ${step.agent_name}</div>` : 
+                                ''
+                            }
+                            ${detailsDisplay ? 
+                                `<div class="step-details">📋 ${detailsDisplay}</div>` : 
+                                ''
+                            }
+                            ${step.claim_id ? 
+                                `<div class="step-details">🔍 Claim: ${step.claim_id}</div>` : 
+                                ''
+                            }
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
 
         console.log('🎉 Insurance Claims Dashboard ready!');
     </script>
