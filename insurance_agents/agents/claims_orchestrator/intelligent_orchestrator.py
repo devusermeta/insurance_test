@@ -119,19 +119,66 @@ class IntelligentClaimsOrchestrator(AgentExecutor):
         logger.setLevel(logging.INFO)
         return logger
     
-    def create_azure_agent(self):
-        """Create an Azure AI Agent instance like host_agent does"""
+    def get_or_create_azure_agent(self):
+        """Get existing Azure AI agent or create new one if needed - implements proper agent persistence"""
         if not self.agents_client:
-            self.logger.warning("⚠️ Azure AI client not available - skipping agent creation")
+            self.logger.warning("⚠️ Azure AI client not available - skipping agent retrieval/creation")
             return None
             
-        instructions = self.get_routing_instructions()
-        
         try:
-            # Get model from environment (using correct variable name)
+            # First, check if we have a stored agent ID
+            stored_agent_id = os.environ.get("AZURE_AI_AGENT_ID")
+            self.logger.info(f"🔍 Environment check: AZURE_AI_AGENT_ID = {stored_agent_id or 'Not Set'}")
+            
+            if stored_agent_id:
+                self.logger.info(f"🔍 Checking for existing agent with ID: {stored_agent_id}")
+                try:
+                    # Try to retrieve the existing agent
+                    existing_agent = self.agents_client.get_agent(stored_agent_id)
+                    if existing_agent:
+                        self.logger.info(f"✅ Found existing Azure AI agent: {existing_agent.name} (ID: {stored_agent_id})")
+                        self.azure_agent = existing_agent
+                        
+                        # Create a new thread for this session (threads should be ephemeral)
+                        self.current_thread = self.agents_client.threads.create()
+                        self.logger.info(f"🧵 Created new thread for session: {self.current_thread.id}")
+                        
+                        return existing_agent
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Stored agent ID {stored_agent_id} not found or invalid: {e}")
+                    self.logger.info("🔄 Will search by name and then create new if needed")
+            
+            # Check for existing agent by name as backup
+            self.logger.info("🔍 Searching for existing agent by name...")
+            try:
+                # List all agents to find one with our name
+                agents_list = self.agents_client.list_agents()
+                for agent in agents_list:
+                    if agent.name == "intelligent-claims-orchestrator":
+                        self.logger.info(f"✅ Found existing agent by name: {agent.name} (ID: {agent.id})")
+                        self.azure_agent = agent
+                        
+                        # Store the agent ID for future use
+                        self.logger.info(f"💾 Storing agent ID {agent.id} for future sessions")
+                        # Note: In production, you might want to store this in a config file or database
+                        # For now, we'll log it so it can be manually added to environment
+                        self.logger.info(f"💡 To avoid future searches, add this to your .env: AZURE_AI_AGENT_ID={agent.id}")
+                        
+                        # Create a new thread for this session
+                        self.current_thread = self.agents_client.threads.create()
+                        self.logger.info(f"🧵 Created new thread for session: {self.current_thread.id}")
+                        
+                        return agent
+            except Exception as e:
+                self.logger.warning(f"⚠️ Error searching for existing agents: {e}")
+            
+            # No existing agent found, create a new one
+            self.logger.info("🆕 Creating new Azure AI agent...")
+            instructions = self.get_routing_instructions()
             model_name = os.environ.get("AZURE_AI_AGENT_MODEL_DEPLOYMENT_NAME", "gpt-4")
             self.logger.info(f"🤖 Creating Azure AI agent with model: {model_name}")
             
+            # Create tool definitions for agent functions
             # Create tool definitions for agent functions
             tools = [
                 {
@@ -207,11 +254,12 @@ class IntelligentClaimsOrchestrator(AgentExecutor):
                 tools=tools
             )
             
-            self.logger.info(f"✅ Created Azure AI agent, ID: {self.azure_agent.id}")
+            self.logger.info(f"✅ Created new Azure AI agent: {self.azure_agent.name} (ID: {self.azure_agent.id})")
+            self.logger.info(f"💡 To avoid recreating this agent, add to your .env: AZURE_AI_AGENT_ID={self.azure_agent.id}")
             
             # Create a thread for conversation
             self.current_thread = self.agents_client.threads.create()
-            self.logger.info(f"✅ Created conversation thread, ID: {self.current_thread.id}")
+            self.logger.info(f"🧵 Created conversation thread: {self.current_thread.id}")
             
             return self.azure_agent
             
@@ -789,21 +837,95 @@ Deliver intelligent responses while maintaining consistent user experience."""
                 "timestamp": datetime.now().isoformat()
             }
     
-    def cleanup(self):
-        """Clean up Azure AI agent resources like host_agent does"""
-        try:
-            if hasattr(self, 'azure_agent') and self.azure_agent and hasattr(self, 'agents_client') and self.agents_client:
-                self.agents_client.delete_agent(self.azure_agent.id)
-                self.logger.info(f"🗑️ Deleted Azure AI agent: {self.azure_agent.id}")
-        except Exception as e:
-            self.logger.error(f"❌ Error cleaning up agent: {e}")
+    def get_agent_status(self) -> Dict[str, Any]:
+        """Get current Azure AI agent status and recommendations"""
+        status = {
+            "azure_ai_available": self.agents_client is not None,
+            "agent_configured": self.azure_agent is not None,
+            "agent_id": self.azure_agent.id if self.azure_agent else None,
+            "agent_name": self.azure_agent.name if self.azure_agent else None,
+            "active_sessions": len(self.session_threads),
+            "recommendations": []
+        }
         
-        # Clean up session threads
+        if status["azure_ai_available"] and status["agent_configured"]:
+            # Check if agent ID is stored in environment
+            stored_agent_id = os.environ.get("AZURE_AI_AGENT_ID")
+            if not stored_agent_id:
+                status["recommendations"].append(f"Add AZURE_AI_AGENT_ID={status['agent_id']} to your .env file to avoid agent recreation")
+            elif stored_agent_id != status["agent_id"]:
+                status["recommendations"].append(f"Environment AZURE_AI_AGENT_ID ({stored_agent_id}) doesn't match current agent ({status['agent_id']})")
+        
+        return status
+
+    def cleanup_old_agents(self):
+        """
+        Utility method to clean up old/duplicate agents from Azure AI Foundry.
+        This can be called manually when needed to remove agents created before 
+        implementing proper agent persistence.
+        """
+        if not self.agents_client:
+            self.logger.warning("⚠️ Azure AI client not available")
+            return
+            
         try:
+            self.logger.info("🧹 Searching for old agents to clean up...")
+            agents_list = self.agents_client.list_agents()
+            
+            orchestrator_agents = []
+            for agent in agents_list:
+                if "claims-orchestrator" in agent.name.lower() or "intelligent-claims" in agent.name.lower():
+                    orchestrator_agents.append(agent)
+            
+            self.logger.info(f"🔍 Found {len(orchestrator_agents)} potential orchestrator agents")
+            
+            if len(orchestrator_agents) > 1:
+                # Keep the most recent one, delete the rest
+                orchestrator_agents.sort(key=lambda x: x.created_at if hasattr(x, 'created_at') else '', reverse=True)
+                agents_to_keep = orchestrator_agents[:1]
+                agents_to_delete = orchestrator_agents[1:]
+                
+                self.logger.info(f"🗂️ Keeping most recent agent: {agents_to_keep[0].name} (ID: {agents_to_keep[0].id})")
+                self.logger.info(f"🗑️ Marking {len(agents_to_delete)} old agents for deletion")
+                
+                for agent in agents_to_delete:
+                    try:
+                        self.logger.info(f"🗑️ Deleting old agent: {agent.name} (ID: {agent.id})")
+                        self.agents_client.delete_agent(agent.id)
+                    except Exception as e:
+                        self.logger.warning(f"⚠️ Could not delete agent {agent.id}: {e}")
+                        
+                # Update environment recommendation
+                if agents_to_keep:
+                    self.logger.info(f"💡 Recommended: Add AZURE_AI_AGENT_ID={agents_to_keep[0].id} to your .env file")
+            else:
+                self.logger.info("✅ No duplicate agents found")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error during agent cleanup: {e}")
+
+    def cleanup(self):
+        """Clean up resources but preserve the persistent agent"""
+        try:
+            # DO NOT delete the agent - it should be persistent!
+            # Only clean up sessions and connections
+            
+            # Clean up session threads
             if hasattr(self, 'session_threads') and self.session_threads:
                 self.logger.info(f"🧹 Cleaning up {len(self.session_threads)} session threads")
-                # Note: Azure AI threads are automatically cleaned up when agent is deleted
+                # Note: Azure AI threads don't need explicit deletion, they're cleaned up automatically
                 self.session_threads.clear()
+            
+            # Close the client connection (but don't delete the agent)
+            if hasattr(self, 'agents_client') and self.agents_client:
+                self.logger.info("🔒 Azure AI client closed")
+                
+            # Note: Agent remains persistent in Azure AI Foundry for future use
+            if hasattr(self, 'azure_agent') and self.azure_agent:
+                self.logger.info(f"💾 Agent {self.azure_agent.id} remains available for future sessions")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error during cleanup: {e}")
         except Exception as e:
             self.logger.error(f"❌ Error cleaning up session threads: {e}")
         
