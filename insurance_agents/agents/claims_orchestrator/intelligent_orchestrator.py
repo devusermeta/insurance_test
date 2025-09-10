@@ -10,6 +10,7 @@ import logging
 import time
 import uuid
 import os
+import httpx
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
@@ -444,7 +445,18 @@ Deliver intelligent responses while maintaining consistent user experience."""
             
             self.logger.info(f"🎯 Processing query with Azure AI: {actual_query}")
             
-            # Use Azure AI agent for intelligent routing if available
+            # PRIORITY 1A: Fast keyword detection for obvious database queries
+            obvious_db_keywords = ['patient', 'claim', 'document', 'database', 'schema', 'count', 'show me', 'find', 'search', 'id', 'bill', 'amount']
+            if any(keyword in actual_query.lower() for keyword in obvious_db_keywords):
+                self.logger.info("⚡ Detected obvious database query - fast routing to MCP tools")
+                return await self._handle_mcp_query(actual_query)
+            
+            # PRIORITY 1B: LLM-based detection for subtle/creative database queries
+            if await self._is_database_query_llm(actual_query):
+                self.logger.info("🧠 LLM detected database query - routing to MCP tools")
+                return await self._handle_mcp_query(actual_query)
+            
+            # PRIORITY 2: Use Azure AI agent for non-database intelligent routing
             if self.azure_agent and self.current_thread:
                 return await self._use_azure_ai_routing(actual_query, session_id)
             else:
@@ -953,6 +965,57 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
             agent_list.append(f"- **{name}**: {info.get('description', 'No description')} ({caps_str})")
         
         return "\n".join(agent_list)
+
+    async def _is_database_query_llm(self, query: str) -> bool:
+        """Use LLM to detect if query is database-related (for subtle cases not caught by keywords)"""
+        try:
+            # Quick and efficient classification prompt
+            classification_prompt = f"""Is this query asking for data from a database? Answer only 'yes' or 'no'.
+
+Query: "{query}"
+
+Examples of database queries:
+- "Tell me about Michael" (yes - asking for person data)
+- "What happened last week?" (yes - asking for historical data) 
+- "Any updates?" (yes - asking for recent data)
+- "Who is the latest?" (yes - asking for data)
+
+Examples of non-database queries:
+- "What can you do?" (no - asking about capabilities)
+- "How do I file a claim?" (no - asking for instructions)
+- "Thank you" (no - social interaction)
+
+Answer:"""
+
+            # Use a lightweight model call for classification
+            endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
+            key = os.getenv('AZURE_OPENAI_KEY')
+            deployment = os.getenv('AZURE_OPENAI_DEPLOYMENT', 'gpt-4o')
+            
+            if not (endpoint and key):
+                # Fallback to keyword-based if no LLM available
+                return False
+                
+            async with httpx.AsyncClient(timeout=5.0) as client:  # Fast timeout for classification
+                response = await client.post(
+                    f"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version=2024-02-15-preview",
+                    headers={"api-key": key, "Content-Type": "application/json"},
+                    json={
+                        "messages": [{"role": "user", "content": classification_prompt}],
+                        "max_tokens": 5,  # Just need 'yes' or 'no'
+                        "temperature": 0  # Deterministic
+                    }
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    answer = result['choices'][0]['message']['content'].strip().lower()
+                    return 'yes' in answer
+                    
+        except Exception as e:
+            self.logger.debug(f"LLM classification failed, using keyword fallback: {e}")
+            
+        return False  # Default to non-database if classification fails
     
     async def _route_to_agent(self, query: str, agent_name: str, task_type: str, session_id: str) -> Dict[str, Any]:
         """Route request to a specific agent"""
