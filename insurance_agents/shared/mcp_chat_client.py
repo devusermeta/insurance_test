@@ -195,7 +195,10 @@ class EnhancedMCPChatClient:
                 # LLM generated a SQL query
                 sql_query = intent_analysis["sql_query"]
                 result = await self._call_mcp_tool("query_cosmos", {"query": sql_query})
-                return f"{intent_analysis['response_prefix']}:\n{result}"
+                
+                # Post-process: Use LLM to format the raw data into a natural language answer
+                formatted_answer = await self._format_database_response(user_query, result)
+                return formatted_answer
                 
             elif intent_analysis["action"] == "list_collections":
                 result = await self._call_mcp_tool("list_collections")
@@ -431,6 +434,63 @@ Return ONLY valid JSON, no other text."""
 Your query: "{user_query}"
 
 What would you like to explore? You can ask for any of the above operations or run direct SQL queries."""
+
+    async def _format_database_response(self, original_query: str, raw_result: str) -> str:
+        """Use LLM to format raw database results into a natural language answer for the specific question."""
+        try:
+            # Check if we have Azure OpenAI configured
+            endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
+            key = os.getenv('AZURE_OPENAI_KEY') 
+            deployment = os.getenv('AZURE_OPENAI_DEPLOYMENT')
+            
+            if not (endpoint and key and deployment):
+                # Fallback: return raw result with basic formatting
+                return f"Here's what I found:\n\n{raw_result}"
+            
+            formatting_prompt = f"""You are an intelligent database assistant. The user asked a specific question, and I retrieved data from the database. Please provide a direct, natural language answer to their specific question using the data provided.
+
+USER'S ORIGINAL QUESTION: "{original_query}"
+
+DATABASE RESULTS:
+{raw_result}
+
+Instructions:
+1. Answer the user's SPECIFIC question directly
+2. If they asked for an ID, give just the ID with context
+3. If they asked "tell me about", give a summary  
+4. If they asked for a count, give the number
+5. Use natural language, not technical database terms
+6. Be concise but complete
+
+NATURAL LANGUAGE ANSWER:"""
+
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version=2024-02-15-preview",
+                    headers={
+                        "api-key": key,
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "messages": [
+                            {"role": "user", "content": formatting_prompt}
+                        ],
+                        "max_tokens": 500,
+                        "temperature": 0.3
+                    }
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    formatted_response = result['choices'][0]['message']['content'].strip()
+                    return formatted_response
+                else:
+                    self.logger.warning(f"Failed to format response: {response.status_code}")
+                    return f"Here's what I found:\n\n{raw_result}"
+                    
+        except Exception as e:
+            self.logger.warning(f"Failed to format database response: {e}")
+            return f"Here's what I found:\n\n{raw_result}"
 
 # Singleton instance - this is the key pattern from the original system
 enhanced_mcp_chat_client = EnhancedMCPChatClient()
