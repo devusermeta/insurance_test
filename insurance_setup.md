@@ -1,7 +1,7 @@
 cd insurance_agents;.\.venv\Scripts\activate;$env:PYTHONPATH = "D:\Metakaal\insurance\insurance_agents"
 
 cd D:\Metakaal\insurance\insurance_agents\insurance_agents_registry_dashboard
-
+cd D:\Metakaal\insurance\azure-cosmos-mcp-server-samples\python
 
 
 # Option 1: Run as modules (recommended)
