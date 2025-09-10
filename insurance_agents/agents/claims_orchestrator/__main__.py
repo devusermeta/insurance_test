@@ -57,9 +57,17 @@ async def initialize_intelligent_orchestrator():
         await orchestrator.initialize()
         
         # Create Azure AI agent if available
+        azure_agent = None
         if orchestrator.agents_client:
-            orchestrator.create_azure_agent()
-            logger.info("✅ Azure AI agent created successfully!")
+            try:
+                azure_agent = orchestrator.create_azure_agent()
+                if azure_agent:
+                    logger.info("✅ Azure AI agent created successfully!")
+                else:
+                    logger.warning("⚠️ Azure AI agent creation failed - using fallback mode")
+            except Exception as e:
+                logger.warning(f"⚠️ Azure AI not available: {str(e)[:100]}...")
+                logger.info("🔄 Continuing with fallback routing capabilities")
         else:
             logger.warning("⚠️ Running without Azure AI - using fallback routing")
         

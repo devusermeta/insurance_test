@@ -218,7 +218,9 @@ class IntelligentClaimsOrchestrator(AgentExecutor):
             self.logger.error(f"❌ Error creating Azure AI agent: {e}")
             self.logger.error(f"Model name: {model_name}")
             self.logger.error(f"Instructions length: {len(instructions)} characters")
-            raise
+            self.logger.warning("⚠️ Will continue in fallback mode without Azure AI agent")
+            # Don't raise - continue in fallback mode
+            return None
         
     async def initialize(self):
         """Initialize the orchestrator by discovering available agents"""
@@ -289,15 +291,31 @@ Document Claims:
 🎯 OTHER REQUEST TYPES:
 - Standalone document analysis: document_intelligence only
 - Coverage questions: coverage_rules_engine only  
-- Data queries: Use MCP tools for Cosmos DB
+- **Data queries: Use query_insurance_data function for database operations**
 - General questions: Answer directly with agent consultation if needed
+
+🔍 **DATA QUERY DECISION LOGIC:**
+USE query_insurance_data function for these patterns:
+✅ "What containers do you have?" / "List containers" / "Show databases"
+✅ "List all claims" / "Show me claims" / "Recent claims"
+✅ "Tell me about patient [name]" / "Find patient [name]"
+✅ "How many claims?" / "Count documents" / "Show samples"
+✅ "Describe schema" / "Show structure" / "What fields"
+✅ Direct SQL: "SELECT * FROM c WHERE..."
+
+DON'T USE query_insurance_data for these:
+❌ "What can you do?" / "Your capabilities" / "Help"
+❌ "How do you work?" / "What is your role?"
+❌ "Process a claim" / "Start claim workflow"
+❌ Agent management / workflow questions
 
 💡 INTELLIGENCE PRINCIPLES:
 - Maintain smart decision-making while ensuring predictable core workflow
 - Always explain routing decisions clearly for UI feedback
 - Ensure minimum 2 steps (intake + coverage) for all claims
 - Maximum 3 steps when documents are involved
-- Provide clear reasoning: "Routing to X agent because..."
+- Use MCP tools smartly for data queries, not for orchestrator questions
+- Provide clear reasoning: "Routing to X agent because..." or "Querying database because..."
 
 Deliver intelligent responses while maintaining consistent user experience."""
 
@@ -743,7 +761,9 @@ Deliver intelligent responses while maintaining consistent user experience."""
             elif any(word in query_lower for word in ['claim', 'process claim', 'file claim']):
                 return await self._execute_claim_processing_workflow(query, session_id, {})
             
-            elif any(word in query_lower for word in ['data', 'query', 'search', 'find']):
+            elif any(word in query_lower for word in ['data', 'query', 'search', 'find', 'list', 'show', 'count', 'containers', 'documents', 'database', 'patient', 'claims']):
+                # Enhanced MCP query detection
+                self.logger.info("🔍 Detected data query - routing to MCP tools")
                 return await self._handle_mcp_query(query)
             
             else:
