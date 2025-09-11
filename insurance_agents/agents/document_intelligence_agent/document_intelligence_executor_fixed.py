@@ -175,7 +175,57 @@ class DocumentIntelligenceExecutor(AgentExecutor):
             
             if not document_urls:
                 self.logger.error("❌ No document URLs found in orchestrator request")
-                return {"status": "error", "response": "No document URLs provided by orchestrator"}
+                self.logger.info("🔄 Attempting direct Cosmos DB lookup for document URLs")
+                
+                # Fallback Strategy: Direct Cosmos DB lookup
+                try:
+                    if self.cosmos_client:
+                        container = self.cosmos_database.get_container_client("claim_details")
+                        query = f"SELECT c.billAttachment, c.memoAttachment, c.dischargeAttachment FROM c WHERE c.claimId = '{claim_id}'"
+                        items = list(container.query_items(query=query, enable_cross_partition_query=True))
+                        
+                        if items:
+                            cosmos_urls = []
+                            item = items[0]
+                            if item.get('billAttachment'):
+                                cosmos_urls.append(item['billAttachment'])
+                            if item.get('memoAttachment'):
+                                cosmos_urls.append(item['memoAttachment'])
+                            if item.get('dischargeAttachment'):
+                                cosmos_urls.append(item['dischargeAttachment'])
+                            
+                            if cosmos_urls:
+                                self.logger.info(f"✅ Found {len(cosmos_urls)} URLs from Cosmos DB")
+                                document_urls = cosmos_urls
+                                for url in document_urls:
+                                    self.logger.info(f"🔗 Cosmos URL: {url}")
+                            else:
+                                self.logger.warning("⚠️ Claim found in Cosmos but no attachment URLs")
+                        else:
+                            self.logger.warning(f"⚠️ Claim {claim_id} not found in Cosmos DB")
+                    
+                    # Final fallback: Generate expected URLs based on claim ID pattern
+                    if not document_urls:
+                        self.logger.info("🔄 Final fallback: Generating expected document URLs")
+                        category = claim_info.get('category', 'Outpatient').lower()
+                        base_url = f"https://captainpstorage1120d503b.blob.core.windows.net/{category}s/{claim_id}"
+                        document_urls = [
+                            f"{base_url}/{claim_id}_Medical_Bill.pdf",
+                            f"{base_url}/{claim_id}_Memo.pdf"
+                        ]
+                        if category == 'inpatient':
+                            document_urls.append(f"{base_url}/{claim_id}_Discharge_Summary.pdf")
+                        
+                        self.logger.info(f"📎 Generated {len(document_urls)} expected URLs")
+                        for url in document_urls:
+                            self.logger.info(f"🔗 Generated URL: {url}")
+                        
+                except Exception as cosmos_error:
+                    self.logger.error(f"❌ Cosmos DB lookup failed: {cosmos_error}")
+                
+                # If still no URLs after all fallbacks, return error
+                if not document_urls:
+                    return {"status": "error", "response": "Unable to locate document URLs after all fallback attempts"}
             
             # Check if already processed
             if await self._is_already_processed_direct(claim_id):

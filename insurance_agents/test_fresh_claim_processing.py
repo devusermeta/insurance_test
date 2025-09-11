@@ -32,8 +32,8 @@ Extract from documents and create document in extracted_patient_data container:
 - Document ID should be: {new_claim_id}
 
 Document URLs to process:
-- Document 1: https://captainpstorage1120d503b.blob.core.windows.net/outpatients/OP-04/OP-04_Medical_Bill.pdf 
-- Document 2: https://captainpstorage1120d503b.blob.core.windows.net/outpatients/OP-04/OP-04_Memo.pdf"""
+- Document 1: https://captainpstorage1120d503b.blob.core.windows.net/outpatients/OP-01/OP-01_Medical_Bill.pdf 
+- Document 2: https://captainpstorage1120d503b.blob.core.windows.net/outpatients/OP-01/OP-01_Memo.pdf"""
 
     print(f"📝 Task request:\n{task_request}\n")
     

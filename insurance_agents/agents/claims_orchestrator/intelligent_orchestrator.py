@@ -1767,7 +1767,64 @@ Document Requirements:
                         
                 except Exception as e:
                     self.logger.error(f"❌ Error extracting document URLs with LLM: {e}")
-                    self.logger.error(f"📝 Raw complete_claim_data: {complete_claim_data}")
+                    self.logger.info("🔄 Falling back to direct URL extraction from claim data")
+                    
+                    # Fallback: Direct extraction from claim data
+                    doc_urls = []
+                    self.logger.info(f"📝 Analyzing complete_claim_data type: {type(complete_claim_data)}")
+                    self.logger.info(f"📝 First 200 chars of complete_claim_data: {str(complete_claim_data)[:200]}")
+                    
+                    if isinstance(complete_claim_data, str):
+                        # Parse URLs from text - multiple extraction methods
+                        lines = complete_claim_data.split('\n')
+                        for line in lines:
+                            line = line.strip()
+                            # Method 1: Look for attachment fields
+                            if 'billAttachment:' in line or 'memoAttachment:' in line or 'dischargeAttachment:' in line:
+                                url_part = line.split(':', 1)[1].strip()
+                                if url_part.startswith('http'):
+                                    doc_urls.append(url_part)
+                                    self.logger.info(f"📎 Found attachment URL: {url_part}")
+                            # Method 2: Look for any HTTP URLs
+                            elif line.startswith('http') and ('.pdf' in line or '.PDF' in line):
+                                doc_urls.append(line)
+                                self.logger.info(f"📎 Found direct URL: {line}")
+                            # Method 3: Extract URLs from anywhere in the line
+                            elif 'http' in line and 'blob.core.windows.net' in line:
+                                import re
+                                urls_in_line = re.findall(r'https://[^\s]+\.pdf', line, re.IGNORECASE)
+                                doc_urls.extend(urls_in_line)
+                                for url in urls_in_line:
+                                    self.logger.info(f"📎 Found regex URL: {url}")
+                            # Method 4: Look for space-separated URLs (from MCP format)
+                            elif 'outpatients' in line and 'pdf' in line:
+                                parts = line.split()
+                                for part in parts:
+                                    if part.startswith('http') and '.pdf' in part:
+                                        doc_urls.append(part)
+                                        self.logger.info(f"📎 Found space-separated URL: {part}")
+                    
+                    # Remove duplicates while preserving order
+                    doc_urls = list(dict.fromkeys(doc_urls))
+                    
+                    self.logger.info(f"📎 Fallback extraction found {len(doc_urls)} document URLs")
+                    for url in doc_urls:
+                        self.logger.info(f"🔗 Document URL: {url}")
+                        
+                    # Strategy 4: If still no URLs, extract from claim ID pattern
+                    if not doc_urls and claim_id:
+                        self.logger.info(f"🔄 No URLs found, generating expected URLs for {claim_id}")
+                        category = claim_details.get('category', 'Outpatient').lower()
+                        base_url = f"https://captainpstorage1120d503b.blob.core.windows.net/{category}s/{claim_id}"
+                        doc_urls = [
+                            f"{base_url}/{claim_id}_Medical_Bill.pdf",
+                            f"{base_url}/{claim_id}_Memo.pdf"
+                        ]
+                        if category == 'inpatient':
+                            doc_urls.append(f"{base_url}/{claim_id}_Discharge_Summary.pdf")
+                        self.logger.info(f"📎 Generated {len(doc_urls)} expected document URLs")
+                        for url in doc_urls:
+                            self.logger.info(f"🔗 Generated URL: {url}")
             else:
                 self.logger.warning(f"⚠️ No complete_claim_data available for URL extraction")
             
@@ -3399,12 +3456,56 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
         """Use LLM to intelligently extract document URLs from claim data"""
         try:
             from openai import AzureOpenAI
+            from dotenv import load_dotenv
+            import os
+            
+            # Ensure environment variables are loaded - try multiple approaches
+            load_dotenv()
+            
+            # Try different working directories for .env file
+            current_dir = os.getcwd()
+            parent_dir = os.path.dirname(current_dir)
+            env_paths = [
+                os.path.join(current_dir, '.env'),
+                os.path.join(parent_dir, '.env'),
+                os.path.join(os.path.dirname(__file__), '..', '..', '.env')
+            ]
+            
+            for env_path in env_paths:
+                if os.path.exists(env_path):
+                    load_dotenv(env_path)
+                    break
+            
+            # Debug environment variables
+            api_key = os.getenv("AZURE_OPENAI_API_KEY")
+            endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+            self.logger.info(f"🔍 Environment check - API Key: {'✅' if api_key else '❌'}, Endpoint: {'✅' if endpoint else '❌'}")
+            
+            if not api_key:
+                self.logger.error("❌ AZURE_OPENAI_API_KEY not found in environment")
+                # Try alternative environment variable names
+                api_key = os.getenv("OPENAI_API_KEY") or os.getenv("AZURE_AI_API_KEY")
+                if api_key:
+                    self.logger.info("✅ Found API key with alternative name")
+                else:
+                    self.logger.error("❌ No API key found with any known name")
+                    return []
+            
+            if not endpoint:
+                self.logger.error("❌ AZURE_OPENAI_ENDPOINT not found in environment")
+                # Try alternative environment variable names
+                endpoint = os.getenv("OPENAI_ENDPOINT") or os.getenv("AZURE_AI_ENDPOINT")
+                if endpoint:
+                    self.logger.info("✅ Found endpoint with alternative name")
+                else:
+                    self.logger.error("❌ No endpoint found with any known name")
+                    return []
             
             # Initialize Azure OpenAI client
             client = AzureOpenAI(
-                api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+                api_key=api_key,
                 api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview"),
-                azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+                azure_endpoint=endpoint
             )
             
             # Create extraction prompt
