@@ -454,29 +454,27 @@ class A2AIntakeClarifierExecutor(AgentExecutor):
                 new_status = 'marked for rejection'
                 reason = f"Data verification failed: {'; '.join(comparison_result['issues'])}"
             
-            async with self.cosmos_client as client:
-                database = client.get_database_client(self.database_name)
-                container = database.get_container_client("claim_details")
+            # Use synchronous Cosmos client directly (no async with needed)
+            database = self.cosmos_client.get_database_client(self.database_name)
+            container = database.get_container_client("claim_details")
+            
+            # Fetch current claim to update
+            query = "SELECT * FROM c WHERE c.claimId = @claim_id"
+            parameters = [{"name": "@claim_id", "value": claim_id}]
+            
+            items = list(container.query_items(query=query, parameters=parameters))
+            
+            if items:
+                claim = items[0]
+                claim['status'] = new_status
+                claim['verification_reason'] = reason
+                claim['verification_timestamp'] = datetime.now().isoformat()
+                claim['updated_by'] = 'intake_clarifier'
                 
-                # Fetch current claim to update
-                query = "SELECT * FROM c WHERE c.claimId = @claim_id"
-                parameters = [{"name": "@claim_id", "value": claim_id}]
-                
-                items = []
-                async for item in container.query_items(query=query, parameters=parameters):
-                    items.append(item)
-                
-                if items:
-                    claim = items[0]
-                    claim['status'] = new_status
-                    claim['verification_reason'] = reason
-                    claim['verification_timestamp'] = datetime.now().isoformat()
-                    claim['updated_by'] = 'intake_clarifier'
-                    
-                    container.upsert_item(claim)
-                    logger.info(f"✅ Updated claim {claim_id} status to: {new_status}")
-                else:
-                    logger.warning(f"⚠️ Claim {claim_id} not found for status update")
+                container.upsert_item(claim)
+                logger.info(f"✅ Updated claim {claim_id} status to: {new_status}")
+            else:
+                logger.warning(f"⚠️ Claim {claim_id} not found for status update")
                     
         except Exception as e:
             logger.error(f"❌ Error updating claim status: {e}")

@@ -1959,8 +1959,21 @@ Claim {claim_id} has been denied during intake verification.
     def _is_claim_approved(self, result: Dict[str, Any]) -> bool:
         """Check if intake clarifier approved the claim"""
         if isinstance(result, dict):
+            # Check status field first (most reliable)
+            status = result.get("status", "").lower()
+            if status == "approved":
+                return True
+            
+            # Check message field (backup check)
             message = result.get("message", "").lower()
-            return "approved" in message or "marked for approval" in message
+            if "approved" in message or "marked for approval" in message:
+                return True
+                
+            # Check response field (used by intake clarifier)
+            response = result.get("response", "").lower()
+            if "approved" in response or "marked for approval" in response:
+                return True
+        
         return False
 
     async def _update_claim_status(self, claim_id: str, new_status: str, reason: str):
