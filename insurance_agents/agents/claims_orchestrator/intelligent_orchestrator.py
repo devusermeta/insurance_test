@@ -21,7 +21,7 @@ from a2a.utils import new_agent_text_message, new_task, new_text_artifact
 
 from shared.agent_discovery import AgentDiscoveryService
 from shared.a2a_client import A2AClient
-from shared.mcp_chat_client import mcp_chat_client
+from shared.mcp_chat_client import enhanced_mcp_chat_client  # Updated import
 from shared.workflow_logger import workflow_logger, WorkflowStepType, WorkflowStepStatus
 
 # Azure AI Foundry imports
@@ -492,6 +492,12 @@ Deliver intelligent responses while maintaining consistent user experience."""
                         break
             
             self.logger.info(f"🎯 Processing query with Azure AI: {actual_query}")
+            
+            # NEW WORKFLOW: Check if this is a "Process claim with ID" request
+            claim_id = enhanced_mcp_chat_client.parse_claim_id_from_message(actual_query)
+            if claim_id:
+                self.logger.info(f"🆔 Detected claim processing request for: {claim_id}")
+                return await self._handle_new_claim_workflow(claim_id, session_id)
             
             # PRIORITY 1A: Fast keyword detection for obvious database queries
             obvious_db_keywords = ['patient', 'claim', 'document', 'database', 'schema', 'count', 'show me', 'find', 'search', 'id', 'bill', 'amount']
@@ -1053,11 +1059,149 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                 "timestamp": datetime.now().isoformat()
             }
     
+    async def _prepare_structured_task_message(self, query: str, agent_name: str, task_type: str, session_id: str) -> str:
+        """Prepare structured task message for agents when dealing with claims"""
+        try:
+            # Try to detect if this is a claim-related query with a claim ID
+            claim_id = await enhanced_mcp_chat_client.parse_claim_id_from_message(query)
+            
+            if claim_id:
+                self.logger.info(f"🎯 Detected claim ID {claim_id} - preparing structured message for {agent_name}")
+                
+                # Extract claim details via MCP for structured messaging
+                claim_details = await enhanced_mcp_chat_client.extract_claim_details(claim_id)
+                
+                if claim_details.get("success"):
+                    # Create structured task message based on agent type
+                    if agent_name == "coverage_rules_engine":
+                        structured_message = f"""NEW WORKFLOW CLAIM EVALUATION REQUEST
+claim_id: {claim_details['claim_id']}
+patient_name: {claim_details['patient_name']}
+bill_amount: ${claim_details['bill_amount']}
+diagnosis: {claim_details['diagnosis']}
+category: {claim_details['category']}
+status: {claim_details['status']}
+bill_date: {claim_details['bill_date']}
+
+Task: Evaluate coverage eligibility and benefits for this structured claim data."""
+                        
+                    elif agent_name == "document_intelligence":
+                        structured_message = f"""NEW WORKFLOW DOCUMENT PROCESSING REQUEST
+claim_id: {claim_details['claim_id']}
+patient_name: {claim_details['patient_name']}
+bill_amount: ${claim_details['bill_amount']}
+diagnosis: {claim_details['diagnosis']}
+category: {claim_details['category']}
+status: {claim_details['status']}
+bill_date: {claim_details['bill_date']}
+
+Task: Process documents and extract medical codes for this structured claim data."""
+                        
+                    elif agent_name == "intake_clarifier":
+                        structured_message = f"""NEW WORKFLOW PATIENT VERIFICATION REQUEST
+claim_id: {claim_details['claim_id']}
+patient_name: {claim_details['patient_name']}
+bill_amount: ${claim_details['bill_amount']}
+diagnosis: {claim_details['diagnosis']}
+category: {claim_details['category']}
+status: {claim_details['status']}
+bill_date: {claim_details['bill_date']}
+
+Task: Verify patient information and assess risk for this structured claim data."""
+                    
+                    else:
+                        # Fallback structured message
+                        structured_message = f"""NEW WORKFLOW CLAIM REQUEST
+claim_id: {claim_details['claim_id']}
+patient_name: {claim_details['patient_name']}
+bill_amount: ${claim_details['bill_amount']}
+diagnosis: {claim_details['diagnosis']}
+category: {claim_details['category']}
+
+Task: {task_type} for claim {claim_id}"""
+                    
+                    self.logger.info(f"✅ Created structured message for {agent_name} with claim data")
+                    return structured_message
+                    
+            # Fallback to original task format if no claim detected or extraction failed
+            return f"{task_type}: {query}"
+            
+        except Exception as e:
+            self.logger.warning(f"⚠️ Error preparing structured message: {e} - falling back to simple format")
+            return f"{task_type}: {query}"
+            
+    async def _handle_new_claim_workflow(self, claim_id: str, session_id: str) -> Dict[str, Any]:
+        """
+        Handle the new claim processing workflow:
+        1. Extract claim details via MCP
+        2. Show to employee for confirmation
+        3. Execute A2A workflow based on confirmation
+        """
+        try:
+            self.logger.info(f"🚀 Starting new claim workflow for: {claim_id}")
+            
+            # Step 1: Extract claim details via MCP
+            claim_details = await enhanced_mcp_chat_client.extract_claim_details(claim_id)
+            
+            if not claim_details.get("success"):
+                return {
+                    "status": "error",
+                    "message": f"Could not retrieve details for claim {claim_id}: {claim_details.get('error', 'Unknown error')}",
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            # Step 2: Format for employee confirmation
+            confirmation_message = f"""**📋 CLAIM PROCESSING REQUEST**
+
+**Claim Details Retrieved:**
+• **Claim ID**: {claim_details['claim_id']}
+• **Patient Name**: {claim_details['patient_name']}
+• **Bill Amount**: ${claim_details['bill_amount']}
+• **Current Status**: {claim_details['status']}
+• **Category**: {claim_details['category']}
+• **Diagnosis**: {claim_details['diagnosis']}
+• **Bill Date**: {claim_details['bill_date']}
+
+**🤖 Ready to Execute Multi-Agent Workflow:**
+1. **Coverage Rules Engine** - Evaluate eligibility and benefits
+2. **Document Intelligence** - Process supporting documents  
+3. **Intake Clarifier** - Verify patient information
+
+**To proceed, please confirm or provide additional instructions.**
+**Note**: This will trigger A2A communication between specialized agents."""
+            
+            self.logger.info(f"✅ Claim details extracted successfully for {claim_id}")
+            self.logger.info(f"   Patient: {claim_details['patient_name']}")
+            self.logger.info(f"   Amount: ${claim_details['bill_amount']}")
+            self.logger.info(f"   Category: {claim_details['category']}")
+            
+            return {
+                "status": "awaiting_confirmation",
+                "response_type": "claim_confirmation",
+                "message": confirmation_message,
+                "claim_details": claim_details,
+                "session_id": session_id,
+                "timestamp": datetime.now().isoformat(),
+                "next_actions": {
+                    "confirm": "Execute full A2A workflow",
+                    "modify": "Update claim details before processing",
+                    "cancel": "Cancel claim processing"
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error in new claim workflow: {e}")
+            return {
+                "status": "error", 
+                "message": f"Error processing claim workflow: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+
     async def _handle_mcp_query(self, query: str) -> Dict[str, Any]:
         """Handle data queries using MCP tools"""
         try:
             self.logger.info(f"🔍 Processing MCP query: {query}")
-            result = await mcp_chat_client.query_cosmos_data(query)
+            result = await enhanced_mcp_chat_client.query_cosmos_data(query)
             
             return {
                 "status": "success",
@@ -1152,6 +1296,9 @@ Answer:"""
             
             self.logger.info(f"🎯 Routing to {agent_name} for {task_type}")
             
+            # Check if this is part of a structured claim workflow
+            task_message = await self._prepare_structured_task_message(query, agent_name, task_type, session_id)
+            
             # Prepare agent-specific payload
             agent_payload = {
                 "action": task_type,
@@ -1163,7 +1310,7 @@ Answer:"""
             # Call the agent using A2A
             agent_response = await self.a2a_client.send_request(
                 target_agent=agent_name,
-                task=f"{task_type}: {query}",
+                task=task_message,
                 parameters=agent_payload
             )
             

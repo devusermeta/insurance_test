@@ -82,7 +82,12 @@ class CoverageRulesExecutorFixed(AgentExecutor):
         FIXED VERSION - Works with correct A2A parameters
         """
         try:
-            # Extract message from context
+            # Try the intake clarifier approach first
+            user_input = context.get_user_input()
+            print(f"\n🔍 COVERAGE EXECUTE - User input method: '{user_input}'")
+            print(f"🔍 COVERAGE EXECUTE - User input length: {len(user_input) if user_input else 0}")
+            
+            # Extract message from context (old method)
             message = context.message
             task_text = ""
             
@@ -93,10 +98,19 @@ class CoverageRulesExecutorFixed(AgentExecutor):
                         task_text += part.text + " "
             
             task_text = task_text.strip()
-            self.logger.info(f"🔄 A2A Executing task: {task_text[:100]}...")
+            
+            # DEBUG: Compare both methods
+            print(f"\n🔍 COVERAGE EXECUTE - Old method length: {len(task_text)}")
+            print(f"🔍 COVERAGE EXECUTE - Old method text: '{task_text}'")
+            
+            # Use the working method
+            final_task_text = user_input if user_input else task_text
+            print(f"🔍 COVERAGE EXECUTE - Using final text: '{final_task_text[:200]}...'")
+            
+            self.logger.info(f"🔄 A2A Executing task: {final_task_text[:100]}...")
             
             # Process the coverage rules evaluation
-            result = await self._process_coverage_rules_task(task_text)
+            result = await self._process_coverage_rules_task(final_task_text)
             
             # Create and send response message
             response_message = new_agent_text_message(
@@ -126,12 +140,20 @@ class CoverageRulesExecutorFixed(AgentExecutor):
         pass
     
     async def _process_coverage_rules_task(self, task_text: str) -> Dict[str, Any]:
-        """Process coverage rules evaluation based on the request text"""
+        """Process coverage rules evaluation based on the request text with new workflow support"""
+        
+        print(f"\n🔍 COVERAGE TASK - Processing task: '{task_text[:100]}...'")
         
         task_lower = task_text.lower()
         
-        # Simulate coverage evaluation
-        self.logger.info("⚖️ Evaluating coverage rules...")
+        # Check if this is a new workflow request with claim details
+        if self._is_new_workflow_claim_request(task_text):
+            print("🔍 COVERAGE TASK - Using NEW WORKFLOW path")
+            return await self._handle_new_workflow_claim_evaluation(task_text)
+        
+        # Legacy processing
+        print("🔍 COVERAGE TASK - Using LEGACY path")
+        self.logger.info("⚖️ Evaluating coverage rules (legacy mode)...")
         await asyncio.sleep(0.1)  # Simulate processing time
         
         # Extract claim amount if present
@@ -193,6 +215,144 @@ class CoverageRulesExecutorFixed(AgentExecutor):
         self.logger.info(f"📊 Coverage: {result['evaluation']['coverage_percentage']}% - ${result['evaluation']['covered_amount']}")
         
         return result
+
+    def _is_new_workflow_claim_request(self, task_text: str) -> bool:
+        """Check if this is a new workflow claim evaluation request"""
+        # DEBUG: Print to console for immediate visibility
+        print(f"\n🔍 COVERAGE DEBUG - Received text: '{task_text[:200]}...'")
+        
+        # Look for structured claim data patterns
+        indicators = [
+            "claim_id" in task_text.lower(),
+            "patient_name" in task_text.lower(), 
+            "bill_amount" in task_text.lower(),
+            "diagnosis" in task_text.lower(),
+            "category" in task_text.lower()
+        ]
+        
+        indicator_count = sum(indicators)
+        print(f"🔍 COVERAGE DEBUG - Found {indicator_count}/5 indicators: {dict(zip(['claim_id', 'patient_name', 'bill_amount', 'diagnosis', 'category'], indicators))}")
+        
+        is_new_workflow = indicator_count >= 2
+        print(f"🔍 COVERAGE DEBUG - New workflow detected: {is_new_workflow}")
+        
+        return is_new_workflow
+
+    async def _handle_new_workflow_claim_evaluation(self, task_text: str) -> Dict[str, Any]:
+        """Handle claim evaluation for new workflow with structured claim data"""
+        try:
+            print("🔍 COVERAGE - Starting NEW WORKFLOW processing")
+            self.logger.info("🆕 Processing NEW WORKFLOW claim evaluation")
+            
+            # Extract structured claim information
+            claim_info = self._extract_claim_info_from_text(task_text)
+            print(f"🔍 COVERAGE - Extracted claim info: {claim_info}")
+            
+            # Perform enhanced coverage evaluation
+            evaluation_result = await self._evaluate_structured_claim(claim_info)
+            print(f"🔍 COVERAGE - Evaluation result: {evaluation_result}")
+            
+            response_message = f"""🔍 **COVERAGE RULES EVALUATION COMPLETE**
+
+**Claim Analysis:**
+• **Claim ID**: {claim_info.get('claim_id', 'Unknown')}
+• **Patient**: {claim_info.get('patient_name', 'Unknown')}
+• **Category**: {claim_info.get('category', 'Unknown')}
+• **Diagnosis**: {claim_info.get('diagnosis', 'Unknown')}
+
+**Coverage Decision:**
+• **Eligibility**: {'✅ COVERED' if evaluation_result['eligible'] else '❌ NOT COVERED'}
+• **Coverage Percentage**: {evaluation_result['coverage_percentage']}%
+• **Covered Amount**: ${evaluation_result['covered_amount']:.2f}
+• **Patient Responsibility**: ${evaluation_result['patient_responsibility']:.2f}
+
+**Rules Applied:**
+{chr(10).join(['• ' + rule for rule in evaluation_result['rules_applied']])}
+"""
+
+            return {
+                "status": "success",
+                "response": response_message,
+                "evaluation": evaluation_result,
+                "workflow_type": "new_structured"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error in new workflow evaluation: {e}")
+            return {
+                "status": "error",
+                "response": f"Coverage evaluation failed: {str(e)}"
+            }
+
+    def _extract_claim_info_from_text(self, text: str) -> Dict[str, Any]:
+        """Extract structured claim information from task text"""
+        import re
+        
+        claim_info = {}
+        
+        # Extract key fields using regex patterns
+        patterns = {
+            'claim_id': r'claim[_\s]*id[:\s]+([A-Z]{2}-\d{2,3})',
+            'patient_name': r'patient[_\s]*name[:\s]+([^,\n]+)',
+            'bill_amount': r'bill[_\s]*amount[:\s]+\$?(\d+(?:\.\d{2})?)',
+            'diagnosis': r'diagnosis[:\s]+([^,\n]+)',
+            'category': r'category[:\s]+([^,\n]+)'
+        }
+        
+        for key, pattern in patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                claim_info[key] = match.group(1).strip()
+        
+        return claim_info
+
+    async def _evaluate_structured_claim(self, claim_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Evaluate coverage for structured claim data"""
+        # Get claim details
+        category = claim_info.get('category', '').lower()
+        bill_amount = float(claim_info.get('bill_amount', 0))
+        diagnosis = claim_info.get('diagnosis', '').lower()
+        
+        # Determine coverage based on category and diagnosis  
+        rules_applied = []
+        
+        if 'outpatient' in category:
+            coverage_percentage = 80
+            max_benefit = 50000
+            deductible = 500
+            rules_applied.append("Outpatient coverage: 80% after $500 deductible")
+        elif 'inpatient' in category:
+            coverage_percentage = 90
+            max_benefit = 100000 
+            deductible = 1000
+            rules_applied.append("Inpatient coverage: 90% after $1000 deductible")
+        else:
+            coverage_percentage = 70
+            max_benefit = 25000
+            deductible = 250
+            rules_applied.append("General medical coverage: 70% after $250 deductible")
+        
+        # Apply diagnosis-specific adjustments
+        if any(condition in diagnosis for condition in ['diabetes', 'chronic', 'ongoing']):
+            coverage_percentage = min(coverage_percentage + 5, 95)  # Bonus for chronic conditions
+            rules_applied.append("Chronic condition adjustment: +5% coverage")
+        
+        # Calculate covered amounts
+        amount_after_deductible = max(0, bill_amount - deductible)
+        covered_amount = min(amount_after_deductible * (coverage_percentage / 100), max_benefit)
+        patient_responsibility = bill_amount - covered_amount
+        
+        rules_applied.append(f"Maximum benefit limit: ${max_benefit:,.2f}")
+        
+        return {
+            "eligible": covered_amount > 0,
+            "coverage_percentage": coverage_percentage,
+            "covered_amount": covered_amount,
+            "patient_responsibility": patient_responsibility,
+            "deductible": deductible,
+            "max_benefit": max_benefit,
+            "rules_applied": rules_applied
+        }
 
 # Create the fixed executor instance
 CoverageRulesExecutor = CoverageRulesExecutorFixed
