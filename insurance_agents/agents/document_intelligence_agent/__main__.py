@@ -20,7 +20,7 @@ from a2a.server.tasks import InMemoryTaskStore, InMemoryPushNotificationConfigSt
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from dotenv import load_dotenv
 
-from agents.document_intelligence.document_intelligence_executor_fixed import DocumentIntelligenceExecutorFixed as DocumentIntelligenceExecutor
+from agents.document_intelligence_agent.document_intelligence_executor_fixed import DocumentIntelligenceExecutorFixed as DocumentIntelligenceExecutor
 from shared.mcp_config import A2A_AGENT_PORTS
 
 # Configure logging
