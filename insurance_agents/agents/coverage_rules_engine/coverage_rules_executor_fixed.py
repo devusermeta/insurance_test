@@ -252,22 +252,22 @@ class CoverageRulesExecutorFixed(AgentExecutor):
             evaluation_result = await self._evaluate_structured_claim(claim_info)
             print(f"🔍 COVERAGE - Evaluation result: {evaluation_result}")
             
-            response_message = f"""🔍 **COVERAGE RULES EVALUATION COMPLETE**
+            response_message = f"""⚖️ **COVERAGE RULES EVALUATION COMPLETE**
 
 **Claim Analysis:**
 • **Claim ID**: {claim_info.get('claim_id', 'Unknown')}
-• **Patient**: {claim_info.get('patient_name', 'Unknown')}
 • **Category**: {claim_info.get('category', 'Unknown')}
 • **Diagnosis**: {claim_info.get('diagnosis', 'Unknown')}
+• **Bill Amount**: ${claim_info.get('bill_amount', 0)}
 
-**Coverage Decision:**
-• **Eligibility**: {'✅ COVERED' if evaluation_result['eligible'] else '❌ NOT COVERED'}
-• **Coverage Percentage**: {evaluation_result['coverage_percentage']}%
-• **Covered Amount**: ${evaluation_result['covered_amount']:.2f}
-• **Patient Responsibility**: ${evaluation_result['patient_responsibility']:.2f}
+**Validation Results:**
+• **Status**: {'✅ APPROVED FOR PROCESSING' if evaluation_result['eligible'] else '❌ REJECTED'}
+• **Decision**: {evaluation_result.get('rejection_reason', 'All business rules passed - continue to next step')}
 
-**Rules Applied:**
+**Business Rules Applied:**
 {chr(10).join(['• ' + rule for rule in evaluation_result['rules_applied']])}
+
+**Next Action**: {'Continue with Document Intelligence and Intake Clarifier' if evaluation_result['eligible'] else 'Update Cosmos DB status to marked for rejection'}
 """
 
             return {
@@ -307,51 +307,93 @@ class CoverageRulesExecutorFixed(AgentExecutor):
         return claim_info
 
     async def _evaluate_structured_claim(self, claim_info: Dict[str, Any]) -> Dict[str, Any]:
-        """Evaluate coverage for structured claim data"""
+        """Evaluate coverage based on your specific business rules"""
         # Get claim details
         category = claim_info.get('category', '').lower()
         bill_amount = float(claim_info.get('bill_amount', 0))
         diagnosis = claim_info.get('diagnosis', '').lower()
+        claim_id = claim_info.get('claim_id', 'Unknown')
         
-        # Determine coverage based on category and diagnosis  
         rules_applied = []
+        rejection_reason = None
         
+        # STEP 1: Document validation (you'll need to implement document checking)
+        # For now, assume documents are available - this should be enhanced to check actual documents
         if 'outpatient' in category:
-            coverage_percentage = 80
-            max_benefit = 50000
-            deductible = 500
-            rules_applied.append("Outpatient coverage: 80% after $500 deductible")
+            rules_applied.append("Outpatient document requirements: bills + memo")
+            # TODO: Add actual document validation
+            documents_valid = True  # Placeholder
         elif 'inpatient' in category:
-            coverage_percentage = 90
-            max_benefit = 100000 
-            deductible = 1000
-            rules_applied.append("Inpatient coverage: 90% after $1000 deductible")
+            rules_applied.append("Inpatient document requirements: bills + memo + discharge summary")
+            # TODO: Add actual document validation  
+            documents_valid = True  # Placeholder
         else:
-            coverage_percentage = 70
-            max_benefit = 25000
-            deductible = 250
-            rules_applied.append("General medical coverage: 70% after $250 deductible")
+            documents_valid = False
+            rejection_reason = "Unknown category - unable to validate documents"
         
-        # Apply diagnosis-specific adjustments
-        if any(condition in diagnosis for condition in ['diabetes', 'chronic', 'ongoing']):
-            coverage_percentage = min(coverage_percentage + 5, 95)  # Bonus for chronic conditions
-            rules_applied.append("Chronic condition adjustment: +5% coverage")
+        if not documents_valid:
+            rules_applied.append(f"❌ Document validation failed: {rejection_reason}")
+            return {
+                "eligible": False,
+                "coverage_percentage": 0,
+                "covered_amount": 0.0,
+                "patient_responsibility": bill_amount,
+                "deductible": 0,
+                "max_benefit": 0,
+                "rules_applied": rules_applied,
+                "rejection_reason": rejection_reason or "Insufficient documents",
+                "status_update_required": True,
+                "new_status": "marked for rejection"
+            }
         
-        # Calculate covered amounts
-        amount_after_deductible = max(0, bill_amount - deductible)
-        covered_amount = min(amount_after_deductible * (coverage_percentage / 100), max_benefit)
-        patient_responsibility = bill_amount - covered_amount
+        # STEP 2: Diagnosis categorization and amount limits
+        diagnosis_category = "general"  # Default
+        amount_limit = 200000  # Default for general
         
-        rules_applied.append(f"Maximum benefit limit: ${max_benefit:,.2f}")
+        if any(eye_term in diagnosis for eye_term in ['eye', 'vision', 'optic', 'retina', 'cornea', 'lens', 'cataract', 'glaucoma', 'macular']):
+            diagnosis_category = "eye"
+            amount_limit = 500
+            rules_applied.append("Eye diagnosis detected - limit: $500")
+        elif any(dental_term in diagnosis for dental_term in ['dental', 'tooth', 'teeth', 'gum', 'oral', 'mouth']):
+            diagnosis_category = "dental" 
+            amount_limit = 1000
+            rules_applied.append("Dental diagnosis detected - limit: $1000")
+        else:
+            diagnosis_category = "general"
+            amount_limit = 200000
+            rules_applied.append("General diagnosis detected - limit: $200000")
+        
+        # STEP 3: Amount validation
+        if bill_amount > amount_limit:
+            rejection_reason = f"Bill amount ${bill_amount} exceeds {diagnosis_category} limit of ${amount_limit}"
+            rules_applied.append(f"❌ Amount limit exceeded: ${bill_amount} > ${amount_limit}")
+            return {
+                "eligible": False,
+                "coverage_percentage": 0,
+                "covered_amount": 0.0,
+                "patient_responsibility": bill_amount,
+                "deductible": 0,
+                "max_benefit": amount_limit,
+                "rules_applied": rules_applied,
+                "rejection_reason": rejection_reason,
+                "status_update_required": True,
+                "new_status": "marked for rejection"
+            }
+        
+        # STEP 4: If all validations pass, approve for further processing
+        rules_applied.append(f"✅ All validations passed - proceeding to next workflow steps")
         
         return {
-            "eligible": covered_amount > 0,
-            "coverage_percentage": coverage_percentage,
-            "covered_amount": covered_amount,
-            "patient_responsibility": patient_responsibility,
-            "deductible": deductible,
-            "max_benefit": max_benefit,
-            "rules_applied": rules_applied
+            "eligible": True,
+            "coverage_percentage": 100,  # Not relevant for your workflow
+            "covered_amount": bill_amount,  # Full amount approved for processing
+            "patient_responsibility": 0.0,
+            "deductible": 0,
+            "max_benefit": amount_limit,
+            "rules_applied": rules_applied,
+            "rejection_reason": None,
+            "status_update_required": False,
+            "new_status": "continue_processing"
         }
 
 # Create the fixed executor instance

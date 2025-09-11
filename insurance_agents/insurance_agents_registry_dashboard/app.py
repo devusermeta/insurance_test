@@ -49,14 +49,14 @@ except ImportError as e:
     class WorkflowStepStatus:
         COMPLETED = "completed"
 
-# Import our UI integration orchestrator
+# Import our orchestrator
 try:
-    from ui_integration_orchestrator import ui_orchestrator
-    print("✅ Successfully imported UI integration orchestrator")
-    UI_ORCHESTRATOR_AVAILABLE = True
+    from agents.claims_orchestrator.intelligent_orchestrator import IntelligentClaimsOrchestrator
+    print("✅ Successfully imported intelligent orchestrator")
+    ORCHESTRATOR_AVAILABLE = True
 except ImportError as e:
-    print(f"⚠️ UI orchestrator not available: {e}")
-    UI_ORCHESTRATOR_AVAILABLE = False
+    print(f"⚠️ Intelligent orchestrator not available: {e}")
+    ORCHESTRATOR_AVAILABLE = False
 
 # Active Processing State Management
 active_processing_sessions = {}  # Track which claims are being actively processed
@@ -279,14 +279,11 @@ async def startup_event():
     """Initialize dashboard on startup"""
     terminal_logger.log("DASHBOARD", "STARTUP", "Insurance Claims Processing Dashboard starting...")
     
-    # Initialize UI orchestrator if available
-    if UI_ORCHESTRATOR_AVAILABLE:
-        terminal_logger.log("DASHBOARD", "STARTUP", "Initializing UI integration orchestrator...")
-        success = await ui_orchestrator.initialize()
-        if success:
-            terminal_logger.log("SUCCESS", "DASHBOARD", "UI orchestrator initialized successfully")
-        else:
-            terminal_logger.log("ERROR", "DASHBOARD", "Failed to initialize UI orchestrator")
+    # Initialize orchestrator if available
+    if ORCHESTRATOR_AVAILABLE:
+        terminal_logger.log("DASHBOARD", "STARTUP", "Initializing intelligent orchestrator...")
+        # Initialize the orchestrator (no need to store globally, we'll create instances as needed)
+        terminal_logger.log("SUCCESS", "DASHBOARD", "Orchestrator available for use")
     
     # Initialize real agents with health checking
     await initialize_demo_agents()
@@ -1242,25 +1239,28 @@ async def chat_with_orchestrator(chat_request: ChatMessage):
             "timestamp": chat_request.timestamp
         })
         
-        # Try to use our integrated UI orchestrator first (for claim processing)
-        if UI_ORCHESTRATOR_AVAILABLE:
+        # Try to use our integrated orchestrator first (for claim processing)
+        if ORCHESTRATOR_AVAILABLE:
             try:
-                terminal_logger.log("CHAT", "ORCHESTRATOR", "Using integrated UI orchestrator for enhanced workflow...")
+                terminal_logger.log("CHAT", "ORCHESTRATOR", "Using intelligent orchestrator for enhanced workflow...")
                 
-                # Process through our proven workflow
-                orchestrator_response = await ui_orchestrator.process_employee_message(
-                    message=chat_request.message,
+                # Create orchestrator instance and process the message
+                orchestrator = IntelligentClaimsOrchestrator()
+                await orchestrator.initialize()
+                
+                orchestrator_response = await orchestrator._process_intelligent_request(
+                    user_input=chat_request.message,
                     session_id=chat_request.sessionId
                 )
                 
                 # Store assistant response
                 chat_sessions[chat_request.sessionId].append({
                     "role": "assistant",
-                    "content": orchestrator_response.message,
+                    "content": orchestrator_response.get("message", ""),
                     "timestamp": datetime.now().isoformat(),
-                    "status": orchestrator_response.status,
-                    "claim_id": orchestrator_response.claim_id,
-                    "requires_confirmation": orchestrator_response.requires_confirmation,
+                    "status": orchestrator_response.get("status", "unknown"),
+                    "claim_id": orchestrator_response.get("claim_id"),
+                    "requires_confirmation": orchestrator_response.get("type") == "awaiting_confirmation",
                     "final_decision": orchestrator_response.final_decision
                 })
                 

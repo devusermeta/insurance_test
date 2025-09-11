@@ -1787,8 +1787,47 @@ Claim {claim_id} has been denied during intake verification.
     def _is_claim_denied(self, result: Dict[str, Any]) -> bool:
         """Check if coverage rules denied the claim"""
         if isinstance(result, dict):
-            message = result.get("message", "").lower()
-            return "denied" in message or "rejected" in message or "exceed" in message
+            # Extract the actual text content from A2A response structure
+            message = ""
+            
+            # Handle A2A response format: result.result.parts[0].text
+            if "result" in result and isinstance(result["result"], dict):
+                if "parts" in result["result"] and isinstance(result["result"]["parts"], list):
+                    if len(result["result"]["parts"]) > 0:
+                        if "text" in result["result"]["parts"][0]:
+                            message = result["result"]["parts"][0]["text"]
+            
+            # Fallback to direct message field if available
+            if not message:
+                message = result.get("message", "")
+            
+            message = message.lower()
+            
+            # Check for denial keywords
+            denial_keywords = ["denied", "rejected", "exceed", "❌ rejected", "insufficient documents", "bill amount exceed limit"]
+            if any(keyword in message for keyword in denial_keywords):
+                return True
+            
+            # Check for specific response patterns from the new coverage rules
+            if "❌" in message or "not covered" in message or "validation failed" in message:
+                return True
+                
+            # Check if the response indicates a JSON structure with denial
+            try:
+                import json
+                if "eligibility" in message:
+                    # Try to parse JSON response
+                    json_start = message.find('{')
+                    if json_start >= 0:
+                        json_part = message[json_start:]
+                        json_end = json_part.find('}') + 1
+                        if json_end > 0:
+                            parsed = json.loads(json_part[:json_end])
+                            if parsed.get("eligibility") == "denied":
+                                return True
+            except:
+                pass
+                
         return False
     
     def _is_claim_approved(self, result: Dict[str, Any]) -> bool:
@@ -1932,22 +1971,33 @@ Claim {claim_id} has been denied during intake verification.
     def _is_coverage_approved(self, coverage_result: Dict[str, Any]) -> bool:
         """Check if coverage was approved from coverage rules engine result"""
         try:
+            # Use the same logic as _is_claim_denied but with inverted result
+            if self._is_claim_denied(coverage_result):
+                return False
+            
             # Look for approval indicators in the response
             if isinstance(coverage_result, dict):
-                response_text = coverage_result.get("response", "").lower()
-                status = coverage_result.get("status", "").lower()
+                # Extract the actual text content from A2A response structure
+                message = ""
                 
-                # Check for explicit approval/denial
-                if "approved" in response_text or "eligible" in response_text:
+                # Handle A2A response format: result.result.parts[0].text
+                if "result" in coverage_result and isinstance(coverage_result["result"], dict):
+                    if "parts" in coverage_result["result"] and isinstance(coverage_result["result"]["parts"], list):
+                        if len(coverage_result["result"]["parts"]) > 0:
+                            if "text" in coverage_result["result"]["parts"][0]:
+                                message = coverage_result["result"]["parts"][0]["text"]
+                
+                # Fallback to direct message field if available
+                if not message:
+                    message = coverage_result.get("response", "").lower()
+                else:
+                    message = message.lower()
+                
+                # Check for explicit approval indicators
+                if "approved" in message or "eligible" in message or "✅" in message:
                     return True
-                if "denied" in response_text or "declined" in response_text:
-                    return False
                     
-                # If status indicates success, assume approved
-                if status == "success" or status == "completed":
-                    return True
-                    
-            # Default to approved if we can't determine (fail-safe for processing)
+            # If we can't determine and there's no denial, default to approved
             return True
             
         except Exception as e:

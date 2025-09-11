@@ -97,42 +97,67 @@ PROCESSING PLAN:
         print(f"\n📊 PROCESSING COMPLETE - EMPLOYEE SEES RESULTS:")
         print("━" * 50)
         
-        # Simulate realistic results based on our claim data
+        # Simulate realistic results based on our simple business rules
+        # Determine diagnosis category and limit
+        diagnosis = claim_details['diagnosis'].lower()
+        if any(eye_term in diagnosis for eye_term in ['eye', 'vision', 'cataract', 'glaucoma']):
+            category = "Eye"
+            limit = 500
+        elif any(dental_term in diagnosis for dental_term in ['dental', 'tooth', 'teeth']):
+            category = "Dental" 
+            limit = 1000
+        else:
+            category = "General"
+            limit = 200000
+            
+        # Check if claim exceeds limit
+        amount = float(claim_details['bill_amount'])
+        if amount > limit:
+            decision = "❌ REJECTED"
+            reason = f"Amount ${amount} exceeds {category} limit of ${limit}"
+            status_icon = "❌"
+        else:
+            decision = "✅ APPROVED"
+            reason = f"Amount ${amount} is within {category} limit of ${limit}"
+            status_icon = "✅"
+            
         final_result = f"""
 🎯 CLAIM {claim_details['claim_id']} PROCESSING COMPLETE
 
-FINAL DECISION: ✅ APPROVED FOR PAYMENT
+FINAL DECISION: {decision}
 
-COVERAGE ANALYSIS:
-├─ Eligible: ✅ YES (Outpatient coverage active)
-├─ Coverage: 80% after $500 deductible  
-├─ Covered Amount: $70.40 (80% of $88)
-└─ Patient Responsibility: $17.60
+BUSINESS RULES EVALUATION:
+├─ Diagnosis Category: {category}
+├─ Amount Limit: ${limit}
+├─ Claim Amount: ${amount}
+└─ Result: {reason}
 
 DOCUMENT VERIFICATION:
-├─ Documents Found: ✅ 3 documents processed
-├─ Confidence: ✅ 85% (High confidence)
-└─ Status: ✅ All required documents verified
+├─ Required for {claim_details['category']}: {"✅ Bills + Memo" if claim_details['category'] == 'Outpatient' else "✅ Bills + Memo + Discharge Summary"}
+└─ Status: ✅ All required documents found
 
-PATIENT VERIFICATION:
-├─ Identity: ✅ Verified ({claim_details['patient_name']})
-├─ Eligibility: ✅ Policy active and current
-└─ Risk Level: 🟢 LOW
+WORKFLOW DECISION:
+└─ {status_icon} Claim {claim_details['claim_id']} is {decision.split()[1]}
 
 NEXT ACTIONS:
-├─ Payment: $70.40 → Process to provider
-├─ Patient: $17.60 → Send balance bill notice
-└─ Status: Updated to "APPROVED" in system
+{"├─ Status: Updated to 'APPROVED' - ready for payment" if amount <= limit else "├─ Status: Updated to 'REJECTED' - exceeds amount limit"}
+└─ Employee notified of final decision
 
-[PROCESS PAYMENT] [GENERATE REPORTS] [CLOSE CLAIM]
+[{"PROCESS PAYMENT" if amount <= limit else "GENERATE DENIAL LETTER"}] [GENERATE REPORTS] [CLOSE CLAIM]
 """
         print(final_result)
         print("━" * 50)
         
-        print("✅ Employee clicks: [PROCESS PAYMENT]")
-        print("💰 System initiates payment to provider")
-        print("📧 System sends notifications to patient and provider")
-        print("📝 Claim status updated in database")
+        if amount <= limit:
+            print("✅ Employee clicks: [PROCESS PAYMENT]")
+            print("💰 System initiates payment to provider")
+            print("📧 System sends notifications to patient and provider")
+            print("📝 Claim status updated to 'APPROVED' in database")
+        else:
+            print("❌ Employee clicks: [GENERATE DENIAL LETTER]")
+            print("📋 System generates denial notification")
+            print("📧 System sends denial notice to patient")
+            print("📝 Claim status updated to 'REJECTED' in database")
         
         print(f"\n🎉 WORKFLOW COMPLETE!")
         print("━" * 50)
