@@ -1662,19 +1662,87 @@ To process claim {claim_id} for {claim_details['patient_name']}:
 
     async def _execute_your_workflow(self, claim_details: Dict[str, Any], session_id: str) -> Dict[str, Any]:
         """
-        Execute your exact workflow requirements:
-        1. Coverage Rules Engine: Document validation + Bill amount limits by diagnosis
-        2. Document Intelligence: Extract data → Create extracted_patient_data document  
-        3. Intake Clarifier: Compare data → Update status to marked for approval/rejection
+        Execute SIMPLE BUSINESS RULES workflow:
+        1. Coverage Rules Engine: Check bill amount limits by diagnosis (Eye: $500, Dental: $1000, General: $200000)
+        2. If approved: Update status to 'approved'
+        3. If rejected: Update status to 'rejected'
+        
+        No complex document verification - just simple amount validation!
         """
         try:
             claim_id = claim_details["claim_id"]
-            self.logger.info(f"🚀 Starting YOUR WORKFLOW for {claim_id}")
+            self.logger.info(f"🚀 Starting SIMPLE BUSINESS RULES WORKFLOW for {claim_id}")
             
-            # STEP 1: Coverage Rules Engine - Document validation and bill amount limits
+            # STEP 1: Coverage Rules Engine - Simple amount validation only
             self.logger.info(f"📊 Calling Coverage Rules Engine for {claim_id}")
             
             coverage_task = f"""Verify documents and check bill amount limits for:
+Claim ID: {claim_id}
+Patient: {claim_details['patient_name']}
+Category: {claim_details['category']}
+Diagnosis: {claim_details['diagnosis']}
+Bill Amount: ${claim_details['bill_amount']}
+
+Rules:
+- Outpatient: Must have bills + memo
+- Inpatient: Must have bills + memo + discharge summary
+- Eye diagnosis: Reject if amount > $500
+- Dental diagnosis: Reject if amount > $1000
+- General diagnosis: Reject if amount > $200000"""
+            
+            coverage_result = await self.a2a_client.send_request(
+                target_agent="coverage_rules_engine",
+                task=coverage_task,
+                parameters={"claim_id": claim_id}
+            )
+            
+            # Check if coverage denied the claim
+            if self._is_claim_denied(coverage_result):
+                # Update status to marked for rejection using MCP
+                await self._update_claim_status(claim_id, "marked for rejection", coverage_result.get("message", "Coverage rules denied"))
+                
+                return {
+                    "status": "denied",
+                    "message": f"❌ **CLAIM DENIED**\n\nClaim {claim_id} has been denied by Coverage Rules Engine.\n\nReason: Amount exceeds diagnosis-specific limit",
+                    "claim_id": claim_id,
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            # If coverage approved, update status and return success
+            await self._update_claim_status(claim_id, "marked for approval", "Coverage rules approved - amount within limits")
+            
+            return {
+                "status": "approved", 
+                "message": f"✅ **CLAIM APPROVED**\n\nClaim {claim_id} has been approved by Coverage Rules Engine.\n\nReason: Amount is within diagnosis-specific limits",
+                "claim_id": claim_id,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error in simple workflow: {e}")
+            return {
+                "status": "error",
+                "message": f"❌ Error in business rules validation: {str(e)}",
+                "timestamp": datetime.now().isoformat(),
+                "claim_id": claim_details.get("claim_id", "unknown")
+            }
+
+    async def _execute_complete_a2a_workflow(self, claim_details: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+        """
+        Execute the complete claim workflow using A2A agents:
+        1. Coverage Rules Engine - Check document and amount limits
+        2. Document Intelligence - Extract patient data and create Cosmos DB document
+        3. Intake Clarifier - Compare data and update final status
+        """
+        try:
+            claim_id = claim_details.get("claim_id")
+            self.logger.info(f"🔄 Starting complete A2A workflow for claim {claim_id}")
+            
+            # STEP 1: Coverage Rules Engine - Document validation and amount limits
+            self.logger.info(f"🔍 Calling Coverage Rules Engine for {claim_id}")
+            
+            coverage_task = f"""Analyze this claim for coverage determination:
+
 Claim ID: {claim_id}
 Patient: {claim_details['patient_name']}
 Category: {claim_details['category']}
