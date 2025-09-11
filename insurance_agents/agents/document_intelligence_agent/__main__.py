@@ -20,12 +20,16 @@ from a2a.server.tasks import InMemoryTaskStore, InMemoryPushNotificationConfigSt
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from dotenv import load_dotenv
 
-from agents.document_intelligence_agent.document_intelligence_executor_fixed import DocumentIntelligenceExecutorFixed as DocumentIntelligenceExecutor
+from agents.document_intelligence_agent.document_intelligence_executor_fixed import DocumentIntelligenceExecutor
 from shared.mcp_config import A2A_AGENT_PORTS
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Suppress Azure SDK verbose logging
+logging.getLogger('azure.core.pipeline.policies.http_logging_policy').setLevel(logging.WARNING)
+logging.getLogger('azure.identity').setLevel(logging.WARNING)
 
 # Custom filter to hide specific agent.json requests
 class AgentJsonFilter(logging.Filter):

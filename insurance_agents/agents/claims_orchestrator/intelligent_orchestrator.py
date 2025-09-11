@@ -1623,7 +1623,7 @@ Task: {task_type} for claim {claim_id}"""
                 del self.pending_confirmations[session_id]
                 
                 # Execute your exact workflow
-                return await self._execute_your_workflow(claim_details, session_id)
+                return await self._execute_complete_a2a_workflow(claim_details, session_id)
                 
             elif user_response in ["no", "n", "cancel", "stop"]:
                 self.logger.info(f"❌ Employee cancelled processing for {claim_id}")
@@ -1662,86 +1662,57 @@ To process claim {claim_id} for {claim_details['patient_name']}:
 
     async def _execute_your_workflow(self, claim_details: Dict[str, Any], session_id: str) -> Dict[str, Any]:
         """
-        Execute SIMPLE BUSINESS RULES workflow:
-        1. Coverage Rules Engine: Check bill amount limits by diagnosis (Eye: $500, Dental: $1000, General: $200000)
-        2. If approved: Update status to 'approved'
-        3. If rejected: Update status to 'rejected'
+        Execute YOUR COMPLETE WORKFLOW with LLM-based processing:
+        1. Coverage Rules Engine: LLM classification + business rules (Eye: $500, Dental: $1000, General: $200K)
+        2. Document Intelligence: Extract patient data to extracted_patient_data container
+        3. Intake Clarifier: LLM-based comparison of claim_details vs extracted_patient_data
         
-        No complex document verification - just simple amount validation!
+        All processing is LLM-based with no manual steps!
         """
-        try:
-            claim_id = claim_details["claim_id"]
-            self.logger.info(f"🚀 Starting SIMPLE BUSINESS RULES WORKFLOW for {claim_id}")
-            
-            # STEP 1: Coverage Rules Engine - Simple amount validation only
-            self.logger.info(f"📊 Calling Coverage Rules Engine for {claim_id}")
-            
-            coverage_task = f"""Verify documents and check bill amount limits for:
-Claim ID: {claim_id}
-Patient: {claim_details['patient_name']}
-Category: {claim_details['category']}
-Diagnosis: {claim_details['diagnosis']}
-Bill Amount: ${claim_details['bill_amount']}
-
-Rules:
-- Outpatient: Must have bills + memo
-- Inpatient: Must have bills + memo + discharge summary
-- Eye diagnosis: Reject if amount > $500
-- Dental diagnosis: Reject if amount > $1000
-- General diagnosis: Reject if amount > $200000"""
-            
-            coverage_result = await self.a2a_client.send_request(
-                target_agent="coverage_rules_engine",
-                task=coverage_task,
-                parameters={"claim_id": claim_id}
-            )
-            
-            # Check if coverage denied the claim
-            if self._is_claim_denied(coverage_result):
-                # Update status to marked for rejection using MCP
-                await self._update_claim_status(claim_id, "marked for rejection", coverage_result.get("message", "Coverage rules denied"))
-                
-                return {
-                    "status": "denied",
-                    "message": f"❌ **CLAIM DENIED**\n\nClaim {claim_id} has been denied by Coverage Rules Engine.\n\nReason: Amount exceeds diagnosis-specific limit",
-                    "claim_id": claim_id,
-                    "timestamp": datetime.now().isoformat()
-                }
-            
-            # If coverage approved, update status and return success
-            await self._update_claim_status(claim_id, "marked for approval", "Coverage rules approved - amount within limits")
-            
-            return {
-                "status": "approved", 
-                "message": f"✅ **CLAIM APPROVED**\n\nClaim {claim_id} has been approved by Coverage Rules Engine.\n\nReason: Amount is within diagnosis-specific limits",
-                "claim_id": claim_id,
-                "timestamp": datetime.now().isoformat()
-            }
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error in simple workflow: {e}")
-            return {
-                "status": "error",
-                "message": f"❌ Error in business rules validation: {str(e)}",
-                "timestamp": datetime.now().isoformat(),
-                "claim_id": claim_details.get("claim_id", "unknown")
-            }
+        # Redirect to the complete A2A workflow that implements your exact vision
+        return await self._execute_complete_a2a_workflow(claim_details, session_id)
 
     async def _execute_complete_a2a_workflow(self, claim_details: Dict[str, Any], session_id: str) -> Dict[str, Any]:
         """
-        Execute the complete claim workflow using A2A agents:
-        1. Coverage Rules Engine - Check document and amount limits
-        2. Document Intelligence - Extract patient data and create Cosmos DB document
-        3. Intake Clarifier - Compare data and update final status
+        Execute YOUR COMPLETE WORKFLOW - LLM-based claim processing:
+        1. Coverage Rules Engine - LLM classification + business rules (Eye: $500, Dental: $1000, General: $200K)
+        2. Document Intelligence - Extract patient data to extracted_patient_data container
+        3. Intake Clarifier - LLM comparison of claim_details vs extracted_patient_data
+        
+        This implements your exact vision: Employee request → MCP extraction → user confirmation → sequential agent processing
         """
         try:
             claim_id = claim_details.get("claim_id")
             self.logger.info(f"🔄 Starting complete A2A workflow for claim {claim_id}")
             
-            # STEP 1: Coverage Rules Engine - Document validation and amount limits
+            # STEP 1: Retrieve complete document data via MCP (including attachments)
+            self.logger.info(f"🔍 Retrieving complete document data for {claim_id}")
+            
+            try:
+                # Get complete document including attachments from MCP
+                sql_query = f"SELECT * FROM c WHERE c.claimId = '{claim_id}'"
+                complete_claim_data = await enhanced_mcp_chat_client._call_mcp_tool("query_cosmos", {"query": sql_query})
+                
+                if complete_claim_data and not "error" in str(complete_claim_data).lower():
+                    self.logger.info(f"✅ Retrieved complete claim data with attachments for {claim_id}")
+                    # Log attachment fields for debugging
+                    if "billAttachment" in str(complete_claim_data):
+                        self.logger.info(f"🔗 Found billAttachment in complete data")
+                    if "memoAttachment" in str(complete_claim_data):
+                        self.logger.info(f"🔗 Found memoAttachment in complete data")
+                    if "dischargeAttachment" in str(complete_claim_data):
+                        self.logger.info(f"🔗 Found dischargeAttachment in complete data")
+                else:
+                    self.logger.warning(f"⚠️ Could not retrieve complete claim data for {claim_id}")
+                    complete_claim_data = {}
+            except Exception as e:
+                self.logger.error(f"❌ Error retrieving complete claim data: {e}")
+                complete_claim_data = {}
+            
+            # STEP 2: Coverage Rules Engine - Document validation and amount limits
             self.logger.info(f"🔍 Calling Coverage Rules Engine for {claim_id}")
             
-            coverage_task = f"""Analyze this claim for coverage determination:
+            coverage_task = f"""Analyze this claim for coverage determination using LLM classification:
 
 Claim ID: {claim_id}
 Patient: {claim_details['patient_name']}
@@ -1749,12 +1720,16 @@ Category: {claim_details['category']}
 Diagnosis: {claim_details['diagnosis']}
 Bill Amount: ${claim_details['bill_amount']}
 
-Rules:
+Complete Document Data (including attachments):
+{complete_claim_data}
+
+LLM Classification Required:
+- Use LLM to classify claim type based on diagnosis (Eye/Dental/General)
+- Apply business rules: Eye ≤ $500, Dental ≤ $1000, General ≤ $200000
+
+Document Requirements:
 - Outpatient: Must have bills + memo
-- Inpatient: Must have bills + memo + discharge summary
-- Eye diagnosis: Reject if amount > $500
-- Dental diagnosis: Reject if amount > $1000  
-- General diagnosis: Reject if amount > $200000"""
+- Inpatient: Must have bills + memo + discharge summary"""
             
             coverage_result = await self.a2a_client.send_request(
                 target_agent="coverage_rules_engine",
@@ -1774,8 +1749,34 @@ Rules:
                     "timestamp": datetime.now().isoformat()
                 }
             
-            # STEP 2: Document Intelligence - Extract patient data
+            # STEP 3: Document Intelligence - Extract patient data
             self.logger.info(f"📄 Calling Document Intelligence for {claim_id}")
+            
+            # Extract document URLs from complete claim data using LLM
+            doc_urls = []
+            if complete_claim_data:
+                try:
+                    self.logger.info("🧠 Using LLM to extract document URLs from complete claim data")
+                    
+                    # Use LLM to extract document URLs intelligently
+                    doc_urls = await self._extract_document_urls_with_llm(complete_claim_data, claim_id)
+                    
+                    self.logger.info(f"📎 LLM found {len(doc_urls)} document URLs for Document Intelligence")
+                    for url in doc_urls:
+                        self.logger.info(f"🔗 Document URL: {url}")
+                        
+                except Exception as e:
+                    self.logger.error(f"❌ Error extracting document URLs with LLM: {e}")
+                    self.logger.error(f"📝 Raw complete_claim_data: {complete_claim_data}")
+            else:
+                self.logger.warning(f"⚠️ No complete_claim_data available for URL extraction")
+            
+            # Include document URLs in the task
+            doc_urls_text = ""
+            if doc_urls:
+                doc_urls_text = "\n\nDocument URLs to process:"
+                for i, url in enumerate(doc_urls, 1):
+                    doc_urls_text += f"\n- Document {i}: {url}"
             
             doc_task = f"""Process documents and create extracted_patient_data for:
 Claim ID: {claim_id}
@@ -1783,7 +1784,7 @@ Category: {claim_details['category']}
 
 Extract from documents and create document in extracted_patient_data container:
 - Patient name, Bill amount, Bill date, Medical condition
-- Document ID should be: {claim_id}"""
+- Document ID should be: {claim_id}{doc_urls_text}"""
             
             doc_result = await self.a2a_client.send_request(
                 target_agent="document_intelligence", 
@@ -1791,7 +1792,7 @@ Extract from documents and create document in extracted_patient_data container:
                 parameters={"claim_id": claim_id, "category": claim_details['category']}
             )
             
-            # STEP 3: Intake Clarifier - Compare data and update status
+            # STEP 4: Intake Clarifier - Compare data and update status
             self.logger.info(f"📋 Calling Intake Clarifier for {claim_id}")
             
             intake_task = f"""Compare claim data with extracted patient data:
@@ -3393,3 +3394,59 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                 "message": f"❌ Error in fallback extraction: {str(e)}",
                 "timestamp": datetime.now().isoformat()
             }
+
+    async def _extract_document_urls_with_llm(self, complete_claim_data, claim_id: str) -> List[str]:
+        """Use LLM to intelligently extract document URLs from claim data"""
+        try:
+            from openai import AzureOpenAI
+            
+            # Initialize Azure OpenAI client
+            client = AzureOpenAI(
+                api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+                api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview"),
+                azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+            )
+            
+            # Create extraction prompt
+            extraction_prompt = f"""Extract all document URLs from the following claim data for claim {claim_id}.
+
+Claim Data:
+{complete_claim_data}
+
+Instructions:
+- Look for URLs that end with .pdf, .jpg, .jpeg, .png, .tiff, .bmp
+- Look for fields like billAttachment, memoAttachment, dischargeAttachment, or any attachment field
+- Return ONLY the URLs, one per line
+- If no URLs found, return "NONE"
+
+URLs:"""
+
+            self.logger.info(f"🧠 Calling LLM to extract document URLs for {claim_id}")
+            
+            response = client.chat.completions.create(
+                model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
+                messages=[
+                    {"role": "system", "content": "You are a data extraction expert. Extract document URLs precisely and accurately."},
+                    {"role": "user", "content": extraction_prompt}
+                ],
+                temperature=0.1
+            )
+            
+            llm_response = response.choices[0].message.content.strip()
+            self.logger.info(f"🧠 LLM response for URL extraction: {llm_response}")
+            
+            # Parse LLM response
+            urls = []
+            if llm_response and llm_response != "NONE":
+                lines = llm_response.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if line and (line.startswith('http://') or line.startswith('https://')):
+                        urls.append(line)
+            
+            self.logger.info(f"🧠 LLM extracted {len(urls)} URLs: {urls}")
+            return urls
+            
+        except Exception as e:
+            self.logger.error(f"❌ LLM URL extraction failed: {e}")
+            return []

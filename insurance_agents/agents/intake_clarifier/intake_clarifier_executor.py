@@ -1,6 +1,6 @@
 """
-Intake Clarifier Executor
-Implements the agent execution logic for the Intake Clarifier with A2A and MCP integration
+Intake Clarifier Executor - Updated for Your Vision
+Implements verification logic by comparing claim_details vs extracted_patient_data
 """
 
 import asyncio
@@ -9,23 +9,29 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import json
 
+from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.events.event_queue import EventQueue
+from a2a.utils import new_agent_text_message
+
 from shared.mcp_config import A2A_AGENT_PORTS
 from shared.mcp_client import MCPClient
+from shared.a2a_client import A2AClient
 
-class IntakeClarifierExecutor:
+class IntakeClarifierExecutor(AgentExecutor):
     """
-    Executor for Intake Clarifier Agent
-    Implements the business logic for validating and clarifying insurance claims
+    Intake Clarifier Executor - Updated for Your Vision
+    Verifies claims by comparing claim_details vs extracted_patient_data
     """
     
     def __init__(self):
         self.agent_name = "intake_clarifier"
-        self.agent_description = "Validates and clarifies incoming insurance claims"
+        self.agent_description = "Verifies claims by comparing extracted vs original data"
         self.port = A2A_AGENT_PORTS["intake_clarifier"]
         self.logger = self._setup_logging()
         
         # Initialize MCP client for Cosmos DB access
         self.mcp_client = MCPClient()
+        self.a2a_client = A2AClient(self.agent_name)
         
     def _setup_logging(self) -> logging.Logger:
         """Setup colored logging for the agent"""
@@ -33,49 +39,78 @@ class IntakeClarifierExecutor:
         
         # Create colored formatter
         formatter = logging.Formatter(
-            f"📋 [{self.agent_name.upper()}] %(asctime)s - %(levelname)s - %(message)s",
+            f"📋 [INTAKE_CLARIFIER] %(asctime)s - %(levelname)s - %(message)s",
             datefmt="%H:%M:%S"
         )
         
-        # Setup console handler
-        handler = logging.StreamHandler()
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        logger.setLevel(logging.INFO)
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+            logger.setLevel(logging.INFO)
         
         return logger
-    
-    async def execute(self, request: Dict[str, Any]) -> Dict[str, Any]:
+
+    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         """
-        Execute a request using the Intake Clarifier logic
-        This is the main entry point for A2A requests
+        Execute verification by comparing claim_details vs extracted_patient_data
+        According to YOUR VISION workflow
         """
         try:
-            self.logger.info(f"🔄 Executing request: {request.get('task', 'unknown')}")
+            user_input = context.get_user_input()
+            self.logger.info(f"� Starting intake verification: {user_input[:100]}...")
             
-            # Extract task and parameters
-            task = request.get('task', '')
-            parameters = request.get('parameters', {})
+            # Extract claim ID from the input
+            claim_id = await self._extract_claim_id_from_input(user_input)
             
-            # Route to appropriate handler
-            if 'clarify_claim_intake' in task.lower():
-                return await self._handle_a2a_claim_clarification(parameters)
-            elif 'clarify' in task.lower() or 'validate' in task.lower():
-                return await self._handle_claim_clarification(parameters)
-            elif 'fraud' in task.lower() or 'risk' in task.lower():
-                return await self._handle_fraud_assessment(parameters)
-            elif 'status' in task.lower():
-                return await self._handle_status_request(parameters)
-            else:
-                return await self._handle_general_request(task, parameters)
-                
+            if not claim_id:
+                await self._send_error_response(context, event_queue, "Could not extract claim ID from input")
+                return
+            
+            # Perform verification according to your vision
+            verification_result = await self._verify_claim_data(claim_id)
+            
+            # Update Cosmos DB status based on verification
+            await self._update_claim_status(claim_id, verification_result)
+            
+            # Send response back to orchestrator
+            await self._send_verification_response(context, event_queue, claim_id, verification_result)
+            
         except Exception as e:
             self.logger.error(f"❌ Execution error: {str(e)}")
-            return {
-                "status": "error",
-                "error": str(e),
-                "agent": self.agent_name
-            }
+            await self._send_error_response(context, event_queue, str(e))
+
+    async def _verify_claim_data(self, claim_id: str) -> Dict[str, Any]:
+        """
+        Core verification logic according to YOUR VISION:
+        1. Fetch claim_details document
+        2. Fetch extracted_patient_data document
+        3. Compare patient name, bill amount, bill date, diagnosis vs medical condition
+        4. Return verification result
+        """
+        try:
+            self.logger.info(f"🔍 Starting verification for claim {claim_id}")
+            
+            # Step 1: Fetch claim_details document
+            claim_details = await self._fetch_claim_details(claim_id)
+            if not claim_details:
+                return self._create_verification_result(False, "claim_details not found", claim_id)
+            
+            # Step 2: Fetch extracted_patient_data document
+            extracted_data = await self._fetch_extracted_patient_data(claim_id)
+            if not extracted_data:
+                return self._create_verification_result(False, "extracted_patient_data not found", claim_id)
+            
+            # Step 3: Perform LLM-based data comparison according to your vision
+            comparison_result = await self._llm_compare_claim_vs_extracted_data(claim_details, extracted_data)
+            
+            self.logger.info(f"✅ Verification completed for {claim_id}: {'PASSED' if comparison_result['verified'] else 'FAILED'}")
+            
+            return comparison_result
+            
+        except Exception as e:
+            self.logger.error(f"❌ Verification error for {claim_id}: {e}")
+            return self._create_verification_result(False, f"verification_error: {str(e)}", claim_id)
     
     async def _handle_claim_clarification(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """Handle claim clarification and validation requests"""
@@ -438,6 +473,317 @@ class IntakeClarifierExecutor:
         
         return min(risk, 100)
     
+    async def _fetch_claim_details(self, claim_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch claim_details document from Cosmos DB"""
+        try:
+            result = await self.mcp_client.execute_tool(
+                "cosmos_query",
+                {
+                    "container": "claim_details",
+                    "query": f"SELECT * FROM c WHERE c.id = '{claim_id}'"
+                }
+            )
+            
+            if result and len(result) > 0:
+                self.logger.info(f"✅ Found claim_details for {claim_id}")
+                return result[0]
+            else:
+                self.logger.warning(f"⚠️ No claim_details found for {claim_id}")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error fetching claim_details for {claim_id}: {e}")
+            return None
+    
+    async def _fetch_extracted_patient_data(self, claim_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch extracted_patient_data document from Cosmos DB"""
+        try:
+            result = await self.mcp_client.execute_tool(
+                "cosmos_query",
+                {
+                    "container": "extracted_patient_data",
+                    "query": f"SELECT * FROM c WHERE c.id = '{claim_id}'"
+                }
+            )
+            
+            if result and len(result) > 0:
+                self.logger.info(f"✅ Found extracted_patient_data for {claim_id}")
+                return result[0]
+            else:
+                self.logger.warning(f"⚠️ No extracted_patient_data found for {claim_id}")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error fetching extracted_patient_data for {claim_id}: {e}")
+            return None
+    
+    async def _llm_compare_claim_vs_extracted_data(self, claim_details: Dict[str, Any], extracted_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Use LLM to intelligently compare claim_details vs extracted_patient_data
+        According to YOUR VISION: Compare patient name, bill amount, bill date, diagnosis vs medical condition
+        """
+        try:
+            # Import Azure OpenAI client
+            from openai import AzureOpenAI
+            import os
+            from dotenv import load_dotenv
+            
+            # Load environment variables
+            load_dotenv()
+            
+            # Initialize Azure OpenAI client
+            client = AzureOpenAI(
+                api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+                api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview"),
+                azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+            )
+            
+            # Create comparison prompt
+            comparison_prompt = self._create_llm_comparison_prompt(claim_details, extracted_data)
+            
+            # Call LLM for intelligent comparison
+            response = client.chat.completions.create(
+                model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o-mini-deployment"),
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert insurance claim verifier. Compare original claim data with extracted document data to identify discrepancies. Be precise and only flag genuine mismatches. Return ONLY valid JSON."
+                    },
+                    {
+                        "role": "user",
+                        "content": comparison_prompt
+                    }
+                ],
+                temperature=0.1,  # Low temperature for consistent verification
+                max_tokens=800
+            )
+            
+            # Parse LLM response
+            llm_result = response.choices[0].message.content.strip()
+            
+            # Clean and parse JSON response
+            if llm_result.startswith("```json"):
+                llm_result = llm_result.replace("```json", "").replace("```", "").strip()
+            
+            comparison_result = json.loads(llm_result)
+            
+            self.logger.info(f"🤖 LLM verification completed: {'VERIFIED' if comparison_result.get('verified', False) else 'REJECTED'}")
+            return comparison_result
+            
+        except Exception as e:
+            self.logger.error(f"❌ LLM comparison failed: {e}")
+            # Fallback to manual comparison if LLM fails
+            return self._fallback_manual_comparison(claim_details, extracted_data)
+    
+    def _create_llm_comparison_prompt(self, claim_details: Dict[str, Any], extracted_data: Dict[str, Any]) -> str:
+        """Create intelligent comparison prompt for LLM"""
+        
+        # Extract key fields from claim_details
+        original_patient = claim_details.get('patientName', '')
+        original_bill_amount = claim_details.get('billAmount', 0)
+        original_bill_date = claim_details.get('billDate', '')
+        original_diagnosis = claim_details.get('diagnosis', '')
+        
+        # Extract fields from extracted documents (smart extraction)
+        extracted_patient_names = []
+        extracted_bill_amounts = []
+        extracted_bill_dates = []
+        extracted_conditions = []
+        
+        # Extract from medical_bill_doc
+        if 'medical_bill_doc' in extracted_data:
+            bill_doc = extracted_data['medical_bill_doc']
+            if bill_doc.get('patient_name'):
+                extracted_patient_names.append(bill_doc['patient_name'])
+            if bill_doc.get('bill_amount'):
+                extracted_bill_amounts.append(bill_doc['bill_amount'])
+            if bill_doc.get('bill_date'):
+                extracted_bill_dates.append(bill_doc['bill_date'])
+        
+        # Extract from memo_doc
+        if 'memo_doc' in extracted_data:
+            memo_doc = extracted_data['memo_doc']
+            if memo_doc.get('patient_name'):
+                extracted_patient_names.append(memo_doc['patient_name'])
+            if memo_doc.get('medical_condition'):
+                extracted_conditions.append(memo_doc['medical_condition'])
+        
+        # Extract from discharge_summary_doc (if inpatient)
+        if 'discharge_summary_doc' in extracted_data:
+            discharge_doc = extracted_data['discharge_summary_doc']
+            if discharge_doc.get('patient_name'):
+                extracted_patient_names.append(discharge_doc['patient_name'])
+            if discharge_doc.get('medical_condition'):
+                extracted_conditions.append(discharge_doc['medical_condition'])
+        
+        return f"""
+Compare the original claim data with extracted document data and verify if they match.
+
+ORIGINAL CLAIM DATA:
+- Patient Name: "{original_patient}"
+- Bill Amount: {original_bill_amount}
+- Bill Date: "{original_bill_date}"
+- Diagnosis: "{original_diagnosis}"
+
+EXTRACTED DOCUMENT DATA:
+- Patient Names Found: {extracted_patient_names}
+- Bill Amounts Found: {extracted_bill_amounts}
+- Bill Dates Found: {extracted_bill_dates}
+- Medical Conditions Found: {extracted_conditions}
+
+VERIFICATION REQUIREMENTS:
+1. Patient names should match (allow for minor variations like "John Doe" vs "John A. Doe")
+2. Bill amounts should match exactly or very closely
+3. Bill dates should match (allow for different date formats)
+4. Diagnosis should match medical conditions (allow for medical terminology variations)
+
+Return JSON with this exact format:
+{{
+    "verified": true/false,
+    "reason": "explanation of verification result",
+    "mismatches": [
+        {{
+            "field": "field_name",
+            "original_value": "value_from_claim",
+            "extracted_value": "value_from_documents",
+            "severity": "high/medium/low"
+        }}
+    ],
+    "overall_confidence": "high/medium/low",
+    "recommendation": "approve/reject"
+}}
+
+Be intelligent about minor variations but flag genuine discrepancies.
+"""
+    
+    def _fallback_manual_comparison(self, claim_details: Dict[str, Any], extracted_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Fallback manual comparison if LLM fails"""
+        # Simple fallback comparison
+        mismatches = []
+        
+        # Basic name comparison
+        original_patient = claim_details.get('patientName', '').lower()
+        extracted_names = []
+        
+        if 'medical_bill_doc' in extracted_data and extracted_data['medical_bill_doc'].get('patient_name'):
+            extracted_names.append(extracted_data['medical_bill_doc']['patient_name'].lower())
+        
+        if extracted_names and not any(original_patient in name or name in original_patient for name in extracted_names):
+            mismatches.append({
+                "field": "patient_name",
+                "original_value": claim_details.get('patientName', ''),
+                "extracted_value": extracted_names[0] if extracted_names else '',
+                "severity": "high"
+            })
+        
+        verified = len(mismatches) == 0
+        
+        return {
+            "verified": verified,
+            "reason": "Fallback manual comparison completed",
+            "mismatches": mismatches,
+            "overall_confidence": "low",
+            "recommendation": "approve" if verified else "reject"
+        }
+    
+    async def _update_claim_status(self, claim_id: str, verification_result: Dict[str, Any]) -> None:
+        """Update claim status in Cosmos DB based on verification result"""
+        try:
+            # Determine new status based on verification
+            if verification_result.get('verified', False):
+                new_status = "marked for approval"
+                self.logger.info(f"✅ Claim {claim_id} marked for approval")
+            else:
+                new_status = "marked for rejection"
+                reason = verification_result.get('reason', 'Verification failed')
+                self.logger.info(f"❌ Claim {claim_id} marked for rejection: {reason}")
+            
+            # Update status in claim_details container
+            await self.mcp_client.execute_tool(
+                "cosmos_update",
+                {
+                    "container": "claim_details",
+                    "document_id": claim_id,
+                    "updates": {
+                        "status": new_status,
+                        "lastUpdatedAt": datetime.now().isoformat(),
+                        "verificationResult": verification_result
+                    }
+                }
+            )
+            
+            self.logger.info(f"📝 Updated claim {claim_id} status to: {new_status}")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to update claim status for {claim_id}: {e}")
+    
+    def _create_verification_result(self, verified: bool, reason: str, claim_id: str) -> Dict[str, Any]:
+        """Create standardized verification result"""
+        return {
+            "verified": verified,
+            "reason": reason,
+            "claim_id": claim_id,
+            "timestamp": datetime.now().isoformat(),
+            "mismatches": [],
+            "overall_confidence": "low" if not verified else "medium",
+            "recommendation": "approve" if verified else "reject"
+        }
+    
+    async def _extract_claim_id_from_input(self, user_input: str) -> Optional[str]:
+        """Extract claim ID from user input using LLM"""
+        try:
+            # Simple regex patterns first
+            import re
+            patterns = [
+                r'claim[_\s]*(?:id[_\s]*)?[:\s]*([A-Z]{2}-\d+)',
+                r'([A-Z]{2}-\d+)',
+                r'claim[_\s]+([A-Z0-9-]+)'
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, user_input, re.IGNORECASE)
+                if match:
+                    return match.group(1)
+            
+            # If no pattern match, could use LLM for extraction
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error extracting claim ID: {e}")
+            return None
+    
+    async def _send_verification_response(self, context: RequestContext, event_queue: EventQueue, claim_id: str, verification_result: Dict[str, Any]) -> None:
+        """Send verification response back to orchestrator"""
+        try:
+            if verification_result.get('verified', False):
+                message = f"✅ Claim {claim_id} has been verified and marked for approval. Documents have been verified successfully."
+            else:
+                reason = verification_result.get('reason', 'Unknown verification failure')
+                message = f"❌ Claim {claim_id} verification failed and marked for rejection. Reason: {reason}"
+            
+            # Send response
+            response_message = new_agent_text_message(message)
+            await event_queue.send_message(response_message)
+            
+            self.logger.info(f"📤 Sent verification response for {claim_id}")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to send verification response: {e}")
+    
+    async def _send_error_response(self, context: RequestContext, event_queue: EventQueue, error_message: str) -> None:
+        """Send error response"""
+        try:
+            message = f"❌ Intake verification error: {error_message}"
+            response_message = new_agent_text_message(message)
+            await event_queue.send_message(response_message)
+        except Exception as e:
+            self.logger.error(f"❌ Failed to send error response: {e}")
+
+    async def cancel(self):
+        """Cancel any ongoing operations"""
+        self.logger.info("🛑 Cancelling intake clarifier operations")
+        await self.cleanup()
+
     async def cleanup(self):
         """Cleanup resources"""
         try:

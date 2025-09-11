@@ -1,13 +1,28 @@
 """
-FIXED Coverage Rules Engine Executor - A2A Compatible
+FIXED Coverage Rules Engine Executor - A2A Compatible with LLM Classification
 This is the corrected version that works with the A2A framework
 """
 
 import asyncio
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List
 from datetime import datetime
 import json
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Also try loading from the azure-cosmos-mcp-server path
+from pathlib import Path
+mcp_env_path = Path(__file__).parent.parent.parent.parent / "azure-cosmos-mcp-server-samples" / "python" / ".env"
+if mcp_env_path.exists():
+    load_dotenv(mcp_env_path)
+
+# Azure Cosmos DB imports
+from azure.cosmos.aio import CosmosClient
+from azure.cosmos import PartitionKey
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events.event_queue import EventQueue
@@ -27,6 +42,9 @@ class CoverageRulesExecutorFixed(AgentExecutor):
         self.port = A2A_AGENT_PORTS["coverage_rules_engine"]
         self.logger = self._setup_logging()
         self.rule_sets = self._initialize_rule_sets()
+        
+        # Initialize Cosmos DB client
+        self._init_cosmos_client()
         
     def _setup_logging(self) -> logging.Logger:
         """Setup colored logging for the agent"""
@@ -48,33 +66,70 @@ class CoverageRulesExecutorFixed(AgentExecutor):
         return logger
     
     def _initialize_rule_sets(self) -> Dict[str, Dict[str, Any]]:
-        """Initialize business rule sets"""
+        """Initialize business rule sets according to YOUR VISION"""
         return {
-            "eligibility_rules": {
-                "min_policy_age_days": 30,
-                "max_claim_amount": 100000,
-                "excluded_claim_types": ["flood", "earthquake", "war"],
-                "required_documents": ["claim_form", "police_report", "photos"]
-            },
-            "coverage_rules": {
-                "medical": {
-                    "outpatient_coverage": True,
-                    "inpatient_coverage": True,
-                    "max_benefit": 50000,
-                    "deductible": 500
+            # YOUR UPDATED SPECIFIC BUSINESS RULES
+            "claim_type_limits": {
+                "eye": {
+                    "max_amount": 500,  # Updated: Eye claims limit $500
+                    "keywords": ["eye", "vision", "optic", "retina", "cornea", "lens", "cataract", "glaucoma", "macular", "ocular"],
+                    "description": "Eye-related medical conditions"
                 },
-                "surgical": {
-                    "coverage_enabled": True,
-                    "max_benefit": 100000,
-                    "deductible": 1000
+                "dental": {
+                    "max_amount": 1000,  # Updated: Dental claims limit $1000  
+                    "keywords": ["dental", "tooth", "teeth", "gum", "oral", "mouth", "periodontal", "cavity", "root canal"],
+                    "description": "Dental and oral health conditions"
+                },
+                "general": {
+                    "max_amount": 200000,  # Updated: General claims limit $200,000
+                    "keywords": [],  # Everything else falls into general
+                    "description": "General medical conditions"
                 }
             },
-            "pricing_rules": {
-                "base_rates": {"medical": 800, "surgical": 1200, "consultation": 300},
-                "risk_multipliers": {"low": 0.8, "medium": 1.0, "high": 1.5},
-                "discount_factors": {"multi_policy": 0.9, "good_health": 0.85}
+            "document_requirements": {
+                "inpatient": {
+                    "required_documents": ["discharge_summary_doc", "medical_bill_doc", "memo_doc"],
+                    "description": "Inpatient claims require discharge summary, medical bill, and memo"
+                },
+                "outpatient": {
+                    "required_documents": ["medical_bill_doc", "memo_doc"],
+                    "description": "Outpatient claims require medical bill and memo"
+                }
+            },
+            "workflow_rules": {
+                "approval_flow": "coverage_rules → document_intelligence → intake_clarifier",
+                "rejection_flow": "coverage_rules → update_status_to_rejected",
+                "containers": {
+                    "input": "claim_details",
+                    "output": "extracted_patient_details"
+                }
             }
         }
+    
+    def _init_cosmos_client(self):
+        """Initialize Cosmos DB client for direct database access"""
+        try:
+            # Get Cosmos DB configuration from environment (matching MCP server variables)
+            self.cosmos_endpoint = os.getenv("COSMOS_URI")
+            self.cosmos_key = os.getenv("COSMOS_KEY")
+            self.database_name = os.getenv("COSMOS_DATABASE", "insurance")
+            self.container_name = os.getenv("COSMOS_CONTAINER", "claim_details")
+            
+            if not self.cosmos_endpoint or not self.cosmos_key:
+                self.logger.warning("⚠️ Cosmos DB credentials not found, direct access disabled")
+                self.cosmos_client = None
+                return
+            
+            # Initialize async Cosmos client
+            self.cosmos_client = CosmosClient(self.cosmos_endpoint, self.cosmos_key)
+            self.logger.info("✅ Cosmos DB client initialized for direct access")
+            
+            # Disable verbose Azure logging
+            logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to initialize Cosmos DB client: {e}")
+            self.cosmos_client = None
     
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         """
@@ -260,14 +315,18 @@ class CoverageRulesExecutorFixed(AgentExecutor):
 • **Diagnosis**: {claim_info.get('diagnosis', 'Unknown')}
 • **Bill Amount**: ${claim_info.get('bill_amount', 0)}
 
-**Validation Results:**
-• **Status**: {'✅ APPROVED FOR PROCESSING' if evaluation_result['eligible'] else '❌ REJECTED'}
-• **Decision**: {evaluation_result.get('rejection_reason', 'All business rules passed - continue to next step')}
+**Business Rules Evaluation:**
+• **Claim Type**: {evaluation_result.get('claim_type', 'Unknown').upper()}
+• **Maximum Allowed**: ${evaluation_result.get('max_allowed', 0)}
+• **Status**: {'✅ APPROVED' if evaluation_result['eligible'] else '❌ REJECTED'}
 
-**Business Rules Applied:**
+**Rules Applied:**
 {chr(10).join(['• ' + rule for rule in evaluation_result['rules_applied']])}
 
-**Next Action**: {'Continue with Document Intelligence and Intake Clarifier' if evaluation_result['eligible'] else 'Update Cosmos DB status to marked for rejection'}
+**Workflow Decision:**
+{f"• ❌ REJECTED: {evaluation_result['rejection_reason']}" if not evaluation_result['eligible'] else f"• ✅ APPROVED: Continue to {evaluation_result['next_agent']}"}
+
+**Next Action**: {evaluation_result['workflow_action'].replace('_', ' ').title()}
 """
 
             return {
@@ -285,29 +344,133 @@ class CoverageRulesExecutorFixed(AgentExecutor):
             }
 
     def _extract_claim_info_from_text(self, text: str) -> Dict[str, Any]:
-        """Extract structured claim information from task text"""
-        import re
-        
-        claim_info = {}
-        
-        # Extract key fields using regex patterns
-        patterns = {
-            'claim_id': r'claim[_\s]*id[:\s]+([A-Z]{2}-\d{2,3})',
-            'patient_name': r'patient[_\s]*name[:\s]+([^,\n]+)',
-            'bill_amount': r'bill[_\s]*amount[:\s]+\$?(\d+(?:\.\d{2})?)',
-            'diagnosis': r'diagnosis[:\s]+([^,\n]+)',
-            'category': r'category[:\s]+([^,\n]+)'
-        }
-        
-        for key, pattern in patterns.items():
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                claim_info[key] = match.group(1).strip()
-        
-        return claim_info
+        """Extract structured claim information from task text using LLM"""
+        try:
+            # Use LLM to extract claim information and complete document data
+            from openai import AzureOpenAI
+            
+            client = AzureOpenAI(
+                api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+                api_version="2024-02-15-preview",
+                azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+            )
+            
+            extraction_prompt = f"""
+            Extract claim information from the following text. If the text contains a "Complete Document Data" section or "Document 1:" section, extract all attachment URLs and relevant fields from it.
+            
+            Text: {text}
+            
+            Look for these patterns:
+            - billAttachment: [URL]
+            - memoAttachment: [URL]  
+            - dischargeAttachment: [URL]
+            - Any https:// URLs containing .pdf files
+            
+            Return a JSON object with the following structure:
+            {{
+                "claim_id": "extracted claim ID",
+                "patient_name": "extracted patient name", 
+                "bill_amount": "extracted bill amount (number only)",
+                "diagnosis": "extracted diagnosis",
+                "category": "extracted category",
+                "billAttachment": "URL if found",
+                "memoAttachment": "URL if found", 
+                "dischargeAttachment": "URL if found"
+            }}
+            
+            Extract URLs from lines like:
+            - memoAttachment: https://...
+            - billAttachment: https://...
+            
+            Only include fields that are actually found in the text.
+            Return only valid JSON, no explanations.
+            """
+            
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "You are a data extraction expert. Extract information exactly as requested and return only valid JSON."},
+                    {"role": "user", "content": extraction_prompt}
+                ],
+                temperature=0,
+                max_tokens=1000
+            )
+            
+            extracted_data = response.choices[0].message.content.strip()
+            
+            # Debug output
+            self.logger.info(f"🧠 LLM raw response: '{extracted_data}'")
+            
+            # Clean up LLM response - remove markdown code blocks if present
+            if extracted_data.startswith('```json'):
+                extracted_data = extracted_data[7:]  # Remove ```json
+            if extracted_data.startswith('```'):
+                extracted_data = extracted_data[3:]  # Remove ```
+            if extracted_data.endswith('```'):
+                extracted_data = extracted_data[:-3]  # Remove trailing ```
+            extracted_data = extracted_data.strip()
+            
+            # Parse the JSON response
+            import json
+            claim_info = json.loads(extracted_data)
+            
+            # Log what was extracted
+            self.logger.info(f"🧠 LLM extracted claim info with {len(claim_info)} fields")
+            
+            # Check for attachment URLs at top level
+            attachment_types = ['billAttachment', 'memoAttachment', 'dischargeAttachment']
+            attachment_count = sum(1 for att_type in attachment_types 
+                                 if att_type in claim_info and claim_info[att_type])
+            
+            if attachment_count > 0:
+                self.logger.info(f"📎 LLM found {attachment_count} attachments in extracted data")
+                for att_type in attachment_types:
+                    if att_type in claim_info and claim_info[att_type]:
+                        self.logger.info(f"🔗 {att_type}: {claim_info[att_type]}")
+            
+            return claim_info
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error in LLM extraction: {e}")
+            
+            # Fallback to basic regex extraction
+            import re
+            claim_info = {}
+            
+            patterns = {
+                'claim_id': r'claim[_\s]*id[:\s]+([A-Z]{2}-\d{2,3})',
+                'patient_name': r'patient[_\s]*name[:\s]+([^,\n]+)',
+                'bill_amount': r'bill[_\s]*amount[:\s]+\$?(\d+(?:\.\d{2})?)',
+                'diagnosis': r'diagnosis[:\s]+([^,\n]+)',
+                'category': r'category[:\s]+([^,\n]+)'
+            }
+            
+            # Extract attachment URLs directly
+            attachment_patterns = {
+                'billAttachment': r'billAttachment[:\s]+(https://[^\s\n]+)',
+                'memoAttachment': r'memoAttachment[:\s]+(https://[^\s\n]+)',
+                'dischargeAttachment': r'dischargeAttachment[:\s]+(https://[^\s\n]+)'
+            }
+            
+            for key, pattern in patterns.items():
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    claim_info[key] = match.group(1).strip()
+            
+            # Extract attachment URLs
+            for att_type, pattern in attachment_patterns.items():
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    claim_info[att_type] = match.group(1).strip()
+                    self.logger.info(f"📎 Regex found {att_type}: {claim_info[att_type]}")
+            
+            self.logger.warning(f"⚠️ Used fallback regex extraction due to LLM error")
+            return claim_info
 
     async def _evaluate_structured_claim(self, claim_info: Dict[str, Any]) -> Dict[str, Any]:
-        """Evaluate coverage based on your specific business rules"""
+        """Evaluate coverage based on YOUR SPECIFIC BUSINESS RULES"""
+        self.logger.info(f"⚖️ Evaluating claim with YOUR business rules: {claim_info}")
+        
         # Get claim details
         category = claim_info.get('category', '').lower()
         bill_amount = float(claim_info.get('bill_amount', 0))
@@ -317,83 +480,312 @@ class CoverageRulesExecutorFixed(AgentExecutor):
         rules_applied = []
         rejection_reason = None
         
-        # STEP 1: Document validation (you'll need to implement document checking)
-        # For now, assume documents are available - this should be enhanced to check actual documents
+        # STEP 0: Check if orchestrator provided complete document data already
+        # The orchestrator now passes complete document data including attachments
+        # No special handling needed - LLM extraction should capture attachments
+        
+        # If basic claim info doesn't have attachments, try to fetch from Cosmos DB as fallback
+        attachment_fields = ['billAttachment', 'memoAttachment', 'dischargeAttachment']
+        has_attachments = any(field in claim_info and claim_info[field] for field in attachment_fields)
+        
+        if not has_attachments:
+            # If orchestrator didn't provide attachments, try to fetch from Cosmos DB as fallback
+            try:
+                full_claim_data = await self._fetch_complete_claim_data(claim_id)
+                if full_claim_data:
+                    # Merge full claim data with parsed claim_info
+                    claim_info.update(full_claim_data)
+                    self.logger.info(f"✅ Retrieved full claim data with attachments for {claim_id}")
+                else:
+                    self.logger.warning(f"⚠️ Could not retrieve full claim data for {claim_id}, proceeding with basic data")
+            except Exception as e:
+                self.logger.error(f"❌ Error fetching complete claim data from Cosmos DB: {e}")
+                self.logger.warning(f"⚠️ Could not retrieve full claim data for {claim_id}, proceeding with basic data")
+        else:
+            self.logger.info(f"✅ Using attachment URLs provided by orchestrator for {claim_id}")
+        
+        # STEP 1: Check document requirements FIRST
+        document_check = self._check_document_requirements(claim_info)
+        if not document_check["valid"]:
+            rejection_reason = document_check["reason"]
+            rules_applied.append(f"❌ REJECTED: {rejection_reason}")
+            return self._create_rejection_result(bill_amount, rules_applied, rejection_reason)
+        
+        rules_applied.extend(document_check["rules_applied"])
+        
+        # STEP 2: Validate claim category
         if 'outpatient' in category:
-            rules_applied.append("Outpatient document requirements: bills + memo")
-            # TODO: Add actual document validation
-            documents_valid = True  # Placeholder
+            required_docs = self.rule_sets["document_requirements"]["outpatient"]["required_documents"]
+            rules_applied.append(f"✅ Outpatient claim - requires: {', '.join(required_docs)}")
         elif 'inpatient' in category:
-            rules_applied.append("Inpatient document requirements: bills + memo + discharge summary")
-            # TODO: Add actual document validation  
-            documents_valid = True  # Placeholder
+            required_docs = self.rule_sets["document_requirements"]["inpatient"]["required_documents"]
+            rules_applied.append(f"✅ Inpatient claim - requires: {', '.join(required_docs)}")
         else:
-            documents_valid = False
-            rejection_reason = "Unknown category - unable to validate documents"
+            rejection_reason = f"Invalid claim category: {category}. Must be 'inpatient' or 'outpatient'"
+            rules_applied.append(f"❌ {rejection_reason}")
+            return self._create_rejection_result(bill_amount, rules_applied, rejection_reason)
         
-        if not documents_valid:
-            rules_applied.append(f"❌ Document validation failed: {rejection_reason}")
-            return {
-                "eligible": False,
-                "coverage_percentage": 0,
-                "covered_amount": 0.0,
-                "patient_responsibility": bill_amount,
-                "deductible": 0,
-                "max_benefit": 0,
-                "rules_applied": rules_applied,
-                "rejection_reason": rejection_reason or "Insufficient documents",
-                "status_update_required": True,
-                "new_status": "marked for rejection"
-            }
+        # STEP 3: Classify claim type based on diagnosis (YOUR SPECIFIC RULES)
+        claim_type = self._classify_claim_type(diagnosis)
+        claim_limits = self.rule_sets["claim_type_limits"][claim_type]
+        max_amount = claim_limits["max_amount"]
         
-        # STEP 2: Diagnosis categorization and amount limits
-        diagnosis_category = "general"  # Default
-        amount_limit = 200000  # Default for general
+        rules_applied.append(f"🏷️ Claim classified as: {claim_type.upper()}")
+        rules_applied.append(f"💰 Maximum allowed amount: ${max_amount}")
         
-        if any(eye_term in diagnosis for eye_term in ['eye', 'vision', 'optic', 'retina', 'cornea', 'lens', 'cataract', 'glaucoma', 'macular']):
-            diagnosis_category = "eye"
-            amount_limit = 500
-            rules_applied.append("Eye diagnosis detected - limit: $500")
-        elif any(dental_term in diagnosis for dental_term in ['dental', 'tooth', 'teeth', 'gum', 'oral', 'mouth']):
-            diagnosis_category = "dental" 
-            amount_limit = 1000
-            rules_applied.append("Dental diagnosis detected - limit: $1000")
-        else:
-            diagnosis_category = "general"
-            amount_limit = 200000
-            rules_applied.append("General diagnosis detected - limit: $200000")
+        # STEP 4: Validate bill amount against YOUR SPECIFIC LIMITS
+        if bill_amount > max_amount:
+            rejection_reason = f"Bill amount ${bill_amount} exceeds {claim_type} limit of ${max_amount}"
+            rules_applied.append(f"❌ REJECTED: {rejection_reason}")
+            return self._create_rejection_result(bill_amount, rules_applied, rejection_reason)
         
-        # STEP 3: Amount validation
-        if bill_amount > amount_limit:
-            rejection_reason = f"Bill amount ${bill_amount} exceeds {diagnosis_category} limit of ${amount_limit}"
-            rules_applied.append(f"❌ Amount limit exceeded: ${bill_amount} > ${amount_limit}")
-            return {
-                "eligible": False,
-                "coverage_percentage": 0,
-                "covered_amount": 0.0,
-                "patient_responsibility": bill_amount,
-                "deductible": 0,
-                "max_benefit": amount_limit,
-                "rules_applied": rules_applied,
-                "rejection_reason": rejection_reason,
-                "status_update_required": True,
-                "new_status": "marked for rejection"
-            }
-        
-        # STEP 4: If all validations pass, approve for further processing
-        rules_applied.append(f"✅ All validations passed - proceeding to next workflow steps")
+        # STEP 5: All validations passed - APPROVE for workflow continuation
+        rules_applied.append(f"✅ Amount validation passed: ${bill_amount} ≤ ${max_amount}")
+        rules_applied.append(f"🔄 APPROVED for next workflow step: Document Intelligence")
         
         return {
             "eligible": True,
-            "coverage_percentage": 100,  # Not relevant for your workflow
-            "covered_amount": bill_amount,  # Full amount approved for processing
-            "patient_responsibility": 0.0,
-            "deductible": 0,
-            "max_benefit": amount_limit,
+            "claim_type": claim_type,
+            "max_allowed": max_amount,
+            "bill_amount": bill_amount,
+            "amount_within_limit": True,
+            "required_documents": required_docs,
             "rules_applied": rules_applied,
             "rejection_reason": None,
-            "status_update_required": False,
-            "new_status": "continue_processing"
+            "workflow_action": "continue_to_document_intelligence",
+            "next_agent": "document_intelligence",
+            "status": "approved_for_processing"
+        }
+        
+    async def _fetch_complete_claim_data(self, claim_id: str) -> Dict[str, Any]:
+        """
+        Fetch complete claim data directly from Cosmos DB including attachment fields
+        """
+        try:
+            if not self.cosmos_client:
+                self.logger.warning("⚠️ Cosmos DB client not available, cannot fetch complete claim data")
+                return {}
+            
+            # Get database and container
+            async with self.cosmos_client as client:
+                database = client.get_database_client(self.database_name)
+                container = database.get_container_client(self.container_name)
+                
+                # Query for the specific claim
+                query = "SELECT * FROM c WHERE c.claimId = @claim_id"
+                parameters = [{"name": "@claim_id", "value": claim_id}]
+                
+                items = []
+                async for item in container.query_items(query=query, parameters=parameters):
+                    items.append(item)
+                
+                if items:
+                    claim_data = items[0]  # Get the first (should be only) result
+                    self.logger.info(f"✅ Retrieved complete claim data for {claim_id} directly from Cosmos DB")
+                    return claim_data
+                else:
+                    self.logger.warning(f"⚠️ No claim found with ID {claim_id}")
+                    return {}
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error fetching complete claim data from Cosmos DB: {e}")
+            return {}
+        
+        # STEP 2: Validate claim category
+        if 'outpatient' in category:
+            required_docs = self.rule_sets["document_requirements"]["outpatient"]["required_documents"]
+            rules_applied.append(f"✅ Outpatient claim - requires: {', '.join(required_docs)}")
+        elif 'inpatient' in category:
+            required_docs = self.rule_sets["document_requirements"]["inpatient"]["required_documents"]
+            rules_applied.append(f"✅ Inpatient claim - requires: {', '.join(required_docs)}")
+        else:
+            rejection_reason = f"Invalid claim category: {category}. Must be 'inpatient' or 'outpatient'"
+            rules_applied.append(f"❌ {rejection_reason}")
+            return self._create_rejection_result(bill_amount, rules_applied, rejection_reason)
+        
+        # STEP 2: Classify claim type based on diagnosis (YOUR SPECIFIC RULES)
+        claim_type = self._classify_claim_type(diagnosis)
+        claim_limits = self.rule_sets["claim_type_limits"][claim_type]
+        max_amount = claim_limits["max_amount"]
+        
+        rules_applied.append(f"🏷️ Claim classified as: {claim_type.upper()}")
+        rules_applied.append(f"💰 Maximum allowed amount: ${max_amount}")
+        
+        # STEP 3: Validate bill amount against YOUR SPECIFIC LIMITS
+        if bill_amount > max_amount:
+            rejection_reason = f"Bill amount ${bill_amount} exceeds {claim_type} limit of ${max_amount}"
+            rules_applied.append(f"❌ REJECTED: {rejection_reason}")
+            return self._create_rejection_result(bill_amount, rules_applied, rejection_reason)
+        
+        # STEP 4: All validations passed - APPROVE for workflow continuation
+        rules_applied.append(f"✅ Amount validation passed: ${bill_amount} ≤ ${max_amount}")
+        rules_applied.append(f"🔄 APPROVED for next workflow step: Document Intelligence")
+        
+        return {
+            "eligible": True,
+            "claim_type": claim_type,
+            "max_allowed": max_amount,
+            "bill_amount": bill_amount,
+            "amount_within_limit": True,
+            "required_documents": required_docs,
+            "rules_applied": rules_applied,
+            "rejection_reason": None,
+            "workflow_action": "continue_to_document_intelligence",
+            "next_agent": "document_intelligence",
+            "status": "approved_for_processing"
+        }
+    
+    def _classify_claim_type(self, diagnosis: str) -> str:
+        """Classify claim type based on diagnosis using LLM for intelligent classification"""
+        try:
+            # Import Azure OpenAI client
+            from openai import AzureOpenAI
+            
+            # Initialize Azure OpenAI client
+            client = AzureOpenAI(
+                api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+                api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview"),
+                azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+            )
+            
+            # Create classification prompt
+            classification_prompt = f"""
+Analyze this medical diagnosis and classify it into one of three categories:
+- "eye": Eye, vision, or ophthalmology-related conditions
+- "dental": Dental, oral, or teeth-related conditions  
+- "general": All other medical conditions
+
+Diagnosis: "{diagnosis}"
+
+Return ONLY the category name (eye, dental, or general) with no additional text.
+"""
+            
+            # Call LLM for classification
+            response = client.chat.completions.create(
+                model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o-mini-deployment"),
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a medical classification expert. Classify medical diagnoses into eye, dental, or general categories. Return only the category name."
+                    },
+                    {
+                        "role": "user",
+                        "content": classification_prompt
+                    }
+                ],
+                temperature=0.1,  # Low temperature for consistent classification
+                max_tokens=10
+            )
+            
+            # Parse LLM response
+            classification_result = response.choices[0].message.content.strip().lower()
+            
+            # Validate result and provide fallback
+            valid_types = ["eye", "dental", "general"]
+            if classification_result in valid_types:
+                self.logger.info(f"🤖 LLM classified '{diagnosis}' as: {classification_result}")
+                return classification_result
+            else:
+                self.logger.warning(f"⚠️ LLM returned invalid classification '{classification_result}', defaulting to general")
+                return "general"
+                
+        except Exception as e:
+            self.logger.error(f"❌ LLM classification failed for '{diagnosis}': {e}")
+            self.logger.info(f"🔄 Falling back to keyword-based classification")
+            
+            # Fallback to keyword-based classification
+            return self._classify_claim_type_keywords(diagnosis)
+    
+    def _classify_claim_type_keywords(self, diagnosis: str) -> str:
+        """Fallback keyword-based classification method"""
+        diagnosis_lower = diagnosis.lower()
+        
+        # Check for eye-related conditions
+        eye_keywords = self.rule_sets["claim_type_limits"]["eye"]["keywords"]
+        if any(keyword in diagnosis_lower for keyword in eye_keywords):
+            self.logger.info(f"🔍 Eye condition detected in: {diagnosis}")
+            return "eye"
+        
+        # Check for dental conditions
+        dental_keywords = self.rule_sets["claim_type_limits"]["dental"]["keywords"]
+        if any(keyword in diagnosis_lower for keyword in dental_keywords):
+            self.logger.info(f"🦷 Dental condition detected in: {diagnosis}")
+            return "dental"
+        
+        # Default to general
+        self.logger.info(f"🏥 General medical condition: {diagnosis}")
+        return "general"
+    
+    def _check_document_requirements(self, claim_info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Check if required documents are present for the claim type
+        Based on your vision: Outpatient needs bill+memo, Inpatient needs bill+memo+discharge
+        """
+        category = claim_info.get('category', '').lower()
+        
+        # DEBUG: Log what we have in claim_info
+        self.logger.info(f"🔍 Document check for category: {category}")
+        self.logger.info(f"🔍 Available fields in claim_info: {list(claim_info.keys())}")
+        self.logger.info(f"🔍 billAttachment: {claim_info.get('billAttachment', 'NOT FOUND')}")
+        self.logger.info(f"🔍 memoAttachment: {claim_info.get('memoAttachment', 'NOT FOUND')}")
+        if 'inpatient' in category:
+            self.logger.info(f"🔍 dischargeAttachment: {claim_info.get('dischargeAttachment', 'NOT FOUND')}")
+        
+        # Determine required attachments based on category
+        if 'outpatient' in category:
+            required_attachments = ['billAttachment', 'memoAttachment']
+            required_docs = ['bill', 'memo']
+        elif 'inpatient' in category:
+            required_attachments = ['billAttachment', 'memoAttachment', 'dischargeAttachment']
+            required_docs = ['bill', 'memo', 'discharge summary']
+        else:
+            return {
+                "valid": False,
+                "reason": f"Invalid category '{category}'. Must be 'inpatient' or 'outpatient'",
+                "rules_applied": []
+            }
+        
+        # Check if all required attachments are present and not empty
+        missing_docs = []
+        rules_applied = []
+        
+        for attachment_field, doc_name in zip(required_attachments, required_docs):
+            attachment_url = claim_info.get(attachment_field, "")
+            if not attachment_url or attachment_url.strip() == "":
+                missing_docs.append(doc_name)
+            else:
+                rules_applied.append(f"✅ {doc_name.title()} document present")
+        
+        if missing_docs:
+            missing_list = ", ".join(missing_docs)
+            return {
+                "valid": False,
+                "reason": f"Insufficient documents for {category} claim. Missing: {missing_list}",
+                "rules_applied": rules_applied
+            }
+        
+        # All documents present
+        rules_applied.append(f"✅ All required documents present for {category} claim")
+        return {
+            "valid": True,
+            "reason": None,
+            "rules_applied": rules_applied
+        }
+    
+    def _create_rejection_result(self, bill_amount: float, rules_applied: List[str], rejection_reason: str) -> Dict[str, Any]:
+        """Create a standardized rejection result"""
+        return {
+            "eligible": False,
+            "claim_type": "unknown",
+            "max_allowed": 0,
+            "bill_amount": bill_amount,
+            "amount_within_limit": False,
+            "required_documents": [],
+            "rules_applied": rules_applied,
+            "rejection_reason": rejection_reason,
+            "workflow_action": "mark_for_rejection",
+            "next_agent": None,
+            "status": "rejected"
         }
 
 # Create the fixed executor instance

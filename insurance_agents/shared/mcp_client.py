@@ -86,16 +86,16 @@ class MCPClient:
                 "method": "tools/call",
                 "params": {
                     "name": tool_name,
-                    "arguments": parameters
+                    "arguments": parameters,
+                    "session_id": self.session_id  # Add session ID to params
                 },
                 "id": 1
             }
             
-            # Make request to MCP server with session ID
+            # Make request to MCP server
             headers = {
                 "Content-Type": "application/json",
-                "Accept": "application/json, text/event-stream",
-                "X-Session-ID": self.session_id
+                "Accept": "application/json, text/event-stream"
             }
             
             response = await self.client.post(
