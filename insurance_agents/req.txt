@@ -1,0 +1,45 @@
+# Insurance Agents Dependencies - Names Only
+# All required dependencies without version constraints
+
+# A2A Protocol SDK
+a2a-sdk
+
+# MCP Protocol SDK
+mcp
+mcp[cli]
+fastmcp
+
+# Azure Services
+azure-cosmos
+azure-identity
+azure-ai-agents
+
+# Web Framework
+fastapi
+uvicorn
+pydantic
+
+# HTTP Clients
+aiohttp
+httpx
+
+# AI Framework
+semantic-kernel
+
+# CLI Framework
+click
+
+# Data Processing
+pandas
+python-dotenv
+
+# Terminal Formatting
+colorama
+rich
+
+# Async Support
+asyncio-mqtt
+
+# Testing
+pytest
+pytest-asyncio
