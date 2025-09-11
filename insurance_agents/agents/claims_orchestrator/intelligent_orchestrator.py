@@ -1432,7 +1432,7 @@ You entered: "{user_input}"
                 # Check for explicit approval/denial
                 if "approved" in response_text or "eligible" in response_text:
                     return True
-                if "denied" in response_text or "rejected" in response_text:
+                if "denied" in response_text or "declined" in response_text:
                     return False
                     
                 # If status indicates success, assume approved

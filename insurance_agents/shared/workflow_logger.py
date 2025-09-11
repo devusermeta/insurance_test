@@ -19,6 +19,11 @@ class WorkflowStepType(Enum):
     AGENT_RESPONSE = "agent_response"
     DECISION = "decision"
     COMPLETION = "completion"
+    PROCESSING = "processing"
+    VALIDATION = "validation"
+    ERROR = "error"
+    AGENT_CALL = "agent_call"
+    FINAL_DECISION = "final_decision"
 
 class WorkflowStepStatus(Enum):
     PENDING = "pending"
@@ -121,6 +126,31 @@ class WorkflowLogger:
         self._save_to_file()  # Persist immediately
         print(f"🔍 WORKFLOW_LOGGER: Claim {claim_id} initialized successfully")
         
+    def log_step(self, 
+                 claim_id: str = None,
+                 step_type: WorkflowStepType = None,
+                 step_name: str = "",
+                 status: WorkflowStepStatus = WorkflowStepStatus.IN_PROGRESS,
+                 details: Optional[Dict[str, Any]] = None,
+                 session_id: str = None) -> str:
+        """Compatibility method for log_step - maps to add_step"""
+        
+        # Set current claim if provided
+        if claim_id and claim_id != self.current_claim:
+            self.start_claim_processing(claim_id)
+        
+        # Convert step_name to title and description
+        title = step_name.replace("_", " ").title() if step_name else "Processing Step"
+        description = f"Executing {step_name}" if step_name else "Processing workflow step"
+        
+        return self.add_step(
+            step_type=step_type or WorkflowStepType.PROCESSING,
+            title=title,
+            description=description,
+            status=status,
+            details=details or {}
+        )
+
     def add_step(self, 
                  step_type: WorkflowStepType,
                  title: str,

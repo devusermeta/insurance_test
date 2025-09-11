@@ -943,7 +943,7 @@ I can help you with:
 **🔍 Claim Information:**
 - "Get details for claim ID 12345"
 - "Show all approved claims"
-- "Find rejected claims"
+- "Find declined claims"
 
 **📈 Analytics:**
 - "Claims summary for this month"

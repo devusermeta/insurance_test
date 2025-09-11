@@ -13,7 +13,7 @@ import os
 import sys
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Optional
 from pathlib import Path
 
 # Add the parent directory to the path so we can import shared modules
@@ -48,6 +48,15 @@ except ImportError as e:
         DISCOVERY = "discovery"
     class WorkflowStepStatus:
         COMPLETED = "completed"
+
+# Import our UI integration orchestrator
+try:
+    from ui_integration_orchestrator import ui_orchestrator
+    print("✅ Successfully imported UI integration orchestrator")
+    UI_ORCHESTRATOR_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️ UI orchestrator not available: {e}")
+    UI_ORCHESTRATOR_AVAILABLE = False
 
 # Active Processing State Management
 active_processing_sessions = {}  # Track which claims are being actively processed
@@ -231,10 +240,14 @@ class ChatMessage(BaseModel):
     timestamp: str
 
 class ChatResponse(BaseModel):
-    """Chat response model"""
-    response: str
+    """Enhanced chat response model with workflow support"""
+    response: str  # Changed from message to response for compatibility
     sessionId: str
     timestamp: str
+    status: Optional[str] = "completed"
+    claim_id: Optional[str] = None
+    requires_confirmation: Optional[bool] = False
+    final_decision: Optional[str] = None
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -265,6 +278,15 @@ terminal_logger = TerminalLogger()
 async def startup_event():
     """Initialize dashboard on startup"""
     terminal_logger.log("DASHBOARD", "STARTUP", "Insurance Claims Processing Dashboard starting...")
+    
+    # Initialize UI orchestrator if available
+    if UI_ORCHESTRATOR_AVAILABLE:
+        terminal_logger.log("DASHBOARD", "STARTUP", "Initializing UI integration orchestrator...")
+        success = await ui_orchestrator.initialize()
+        if success:
+            terminal_logger.log("SUCCESS", "DASHBOARD", "UI orchestrator initialized successfully")
+        else:
+            terminal_logger.log("ERROR", "DASHBOARD", "Failed to initialize UI orchestrator")
     
     # Initialize real agents with health checking
     await initialize_demo_agents()
@@ -1205,7 +1227,7 @@ async def simulate_claim_processing(claim_id: str):
 
 @app.post("/api/chat")
 async def chat_with_orchestrator(chat_request: ChatMessage):
-    """Chat with Claims Orchestrator via MCP tools"""
+    """Enhanced chat with integrated UI orchestrator for complete claim processing workflow"""
     try:
         terminal_logger.log("CHAT", "MESSAGE", f"Session {chat_request.sessionId[:8]}...: {chat_request.message[:50]}...")
         
@@ -1219,6 +1241,46 @@ async def chat_with_orchestrator(chat_request: ChatMessage):
             "content": chat_request.message,
             "timestamp": chat_request.timestamp
         })
+        
+        # Try to use our integrated UI orchestrator first (for claim processing)
+        if UI_ORCHESTRATOR_AVAILABLE:
+            try:
+                terminal_logger.log("CHAT", "ORCHESTRATOR", "Using integrated UI orchestrator for enhanced workflow...")
+                
+                # Process through our proven workflow
+                orchestrator_response = await ui_orchestrator.process_employee_message(
+                    message=chat_request.message,
+                    session_id=chat_request.sessionId
+                )
+                
+                # Store assistant response
+                chat_sessions[chat_request.sessionId].append({
+                    "role": "assistant",
+                    "content": orchestrator_response.message,
+                    "timestamp": datetime.now().isoformat(),
+                    "status": orchestrator_response.status,
+                    "claim_id": orchestrator_response.claim_id,
+                    "requires_confirmation": orchestrator_response.requires_confirmation,
+                    "final_decision": orchestrator_response.final_decision
+                })
+                
+                terminal_logger.log("SUCCESS", "CHAT", f"UI orchestrator response: {orchestrator_response.status}")
+                
+                return ChatResponse(
+                    response=orchestrator_response.message,  # Map message to response
+                    sessionId=chat_request.sessionId,
+                    timestamp=datetime.now().isoformat(),
+                    status=orchestrator_response.status,
+                    claim_id=orchestrator_response.claim_id,
+                    requires_confirmation=orchestrator_response.requires_confirmation or False,
+                    final_decision=orchestrator_response.final_decision
+                )
+                
+            except Exception as e:
+                terminal_logger.log("WARNING", "CHAT", f"UI orchestrator failed, falling back to legacy chat: {e}")
+                # Fall through to legacy implementation
+        
+        # Legacy implementation as fallback
         
         # Prepare A2A payload for Claims Orchestrator with proper JSON-RPC 2.0 format
         a2a_payload = {

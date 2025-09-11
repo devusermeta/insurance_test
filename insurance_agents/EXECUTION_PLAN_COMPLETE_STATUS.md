@@ -39,7 +39,7 @@ Based on your comprehensive execution plan, here's the complete status of all ph
   - ✅ Dental diagnosis: >$1000 → Reject
   - ✅ General diagnosis: >$200,000 → Reject
 - ✅ Return: "continue" or "reject with reason"
-- ✅ Update Cosmos status if rejected
+- ✅ Update Cosmos status if declined
 
 ### **Step 5: Document Intelligence Agent** ✅ COMPLETE
 - ✅ **NEW FLOW**: Receive claim_id via A2A → Get URLs from Cosmos
@@ -56,7 +56,7 @@ Based on your comprehensive execution plan, here's the complete status of all ph
 - ✅ Fetch: Both claim_details and extracted_patient_data documents
 - ✅ Compare: patient_name, bill_amount, bill_date, diagnosis ↔ medical_condition
 - ✅ Update: Cosmos status (submitted → marked for approval/rejection)
-- ✅ Return: "approved" or "rejected with mismatch reason"
+- ✅ Return: "approved" or "declined with mismatch reason"
 
 ---
 

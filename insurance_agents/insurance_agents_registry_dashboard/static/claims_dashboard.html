@@ -1207,13 +1207,13 @@
                     </div>
                     
                     <div class="claim-actions">
-                        <button class="process-btn" onclick="processClaim('${claim.claimId}')">
-                            <i class="fas fa-play"></i>
-                            ${smartStatus.action}
-                        </button>
                         <button class="view-btn" onclick="viewClaimDetails('${claim.claimId}')">
                             <i class="fas fa-eye"></i>
                             View Details
+                        </button>
+                        <button class="chat-btn" onclick="openChatWithClaim('${claim.claimId}')">
+                            <i class="fas fa-comment"></i>
+                            Process via Chat
                         </button>
                     </div>
                 </div>`;
@@ -1250,7 +1250,7 @@
                     return { class: 'processing', display: 'PROCESSING', action: 'Continue' };
                 case 'failed':
                 case 'error':
-                case 'rejected':
+                case 'declined':
                     return { class: 'failed', display: 'FAILED', action: 'Retry' };
                 case 'submitted':
                     return { class: 'pending', display: 'SUBMITTED', action: 'Process' };
@@ -1430,29 +1430,28 @@
             await loadClaims();
         }
 
-        // Process claim
-        async function processClaim(claimId) {
-            try {
-                const employeeId = prompt('Enter your Employee ID:');
-                if (!employeeId) return;
+        // Open chat with specific claim context
+        function openChatWithClaim(claimId) {
+            // Open the chat interface
+            openChat();
+            
+            // Pre-populate with claim processing message
+            const chatInput = document.getElementById('chatInput');
+            if (chatInput) {
+                chatInput.value = `Process claim with ${claimId}`;
+                chatInput.focus();
                 
-                const response = await apiCall(`/api/claims/${claimId}/process`, {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        claimId: claimId,
-                        expectedOutput: 'Automated processing workflow',
-                        priority: 'normal',
-                        employeeId: employeeId
-                    })
-                });
-                
-                alert('Claim processing started successfully!');
-                await loadClaims();
-                
-            } catch (error) {
-                console.error('Error processing claim:', error);
-                alert('Failed to process claim. Please try again.');
+                // Automatically send the message after a brief delay
+                setTimeout(() => {
+                    sendChatMessage();
+                }, 500);
             }
+        }
+
+        // Legacy processClaim function (kept for compatibility)
+        async function processClaim(claimId) {
+            // Redirect to chat-based processing
+            openChatWithClaim(claimId);
         }
 
         // View claim details

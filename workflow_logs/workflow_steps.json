@@ -1094,5 +1094,152 @@
       },
       "duration_ms": null
     }
+  ],
+  "OP-05": [
+    {
+      "step_id": "step_01",
+      "claim_id": "OP-05",
+      "step_type": "agent_call",
+      "title": "Calling Coverage Rules Engine",
+      "description": "Executing calling_coverage_rules_engine",
+      "status": "in_progress",
+      "timestamp": "2025-09-11T19:39:34.180393",
+      "agent_name": null,
+      "agent_reasoning": null,
+      "details": {
+        "agent": "coverage_rules_engine",
+        "action": "processing_claim"
+      },
+      "duration_ms": null
+    },
+    {
+      "step_id": "step_02",
+      "claim_id": "OP-05",
+      "step_type": "agent_call",
+      "title": "Completed Coverage Rules Engine",
+      "description": "Executing completed_coverage_rules_engine",
+      "status": "completed",
+      "timestamp": "2025-09-11T19:39:36.551635",
+      "agent_name": null,
+      "agent_reasoning": null,
+      "details": {
+        "agent": "coverage_rules_engine",
+        "response": {
+          "id": "a2a-coverage_rules_engine-3470e392-72a6-463e-b2c5-bb1a18744907",
+          "jsonrpc": "2.0",
+          "result": {
+            "kind": "message",
+            "messageId": "3de2d544-e194-4967-842c-e8bb1b4f0131",
+            "parts": [
+              {
+                "kind": "text",
+                "text": "{\n  \"status\": \"success\",\n  \"message\": \"Coverage evaluation completed: General coverage evaluation\",\n  \"eligibility\": \"approved\",\n  \"covered_amount\": 350.0,\n  \"coverage_percentage\": 41.18,\n  \"deductible\": 500\n}"
+              }
+            ],
+            "role": "agent",
+            "taskId": "f14df429-5217-4f93-b63d-969147000da7"
+          }
+        }
+      },
+      "duration_ms": null
+    },
+    {
+      "step_id": "step_03",
+      "claim_id": "OP-05",
+      "step_type": "agent_call",
+      "title": "Calling Document Intelligence",
+      "description": "Executing calling_document_intelligence",
+      "status": "in_progress",
+      "timestamp": "2025-09-11T19:39:38.810531",
+      "agent_name": null,
+      "agent_reasoning": null,
+      "details": {
+        "agent": "enhanced_document_intelligence",
+        "action": "processing_documents"
+      },
+      "duration_ms": null
+    },
+    {
+      "step_id": "step_04",
+      "claim_id": "OP-05",
+      "step_type": "agent_call",
+      "title": "Completed Document Intelligence",
+      "description": "Executing completed_document_intelligence",
+      "status": "completed",
+      "timestamp": "2025-09-11T19:39:52.551154",
+      "agent_name": null,
+      "agent_reasoning": null,
+      "details": {
+        "agent": "enhanced_document_intelligence",
+        "response": {
+          "status": "error",
+          "message": "Claim OP-05 not found",
+          "agent": "document_intelligence"
+        }
+      },
+      "duration_ms": null
+    },
+    {
+      "step_id": "step_05",
+      "claim_id": "OP-05",
+      "step_type": "agent_call",
+      "title": "Calling Intake Clarifier",
+      "description": "Executing calling_intake_clarifier",
+      "status": "in_progress",
+      "timestamp": "2025-09-11T19:39:54.837101",
+      "agent_name": null,
+      "agent_reasoning": null,
+      "details": {
+        "agent": "enhanced_intake_clarifier",
+        "action": "validating_claim"
+      },
+      "duration_ms": null
+    },
+    {
+      "step_id": "step_06",
+      "claim_id": "OP-05",
+      "step_type": "agent_call",
+      "title": "Completed Intake Clarifier",
+      "description": "Executing completed_intake_clarifier",
+      "status": "completed",
+      "timestamp": "2025-09-11T19:40:19.305979",
+      "agent_name": null,
+      "agent_reasoning": null,
+      "details": {
+        "agent": "enhanced_intake_clarifier",
+        "response": {
+          "status": "marked for approval",
+          "message": "✅ Claim OP-05 approved and marked for approval in Cosmos DB",
+          "reason": "Basic validation passed (no extracted data to compare)",
+          "validation_details": {
+            "approved": true,
+            "reason": "Basic validation passed (no extracted data to compare)",
+            "mismatches": [],
+            "data_comparison": {}
+          },
+          "agent": "Enhanced Intake Clarifier",
+          "cosmos_updated": true
+        }
+      },
+      "duration_ms": null
+    },
+    {
+      "step_id": "step_07",
+      "claim_id": "OP-05",
+      "step_type": "final_decision",
+      "title": "Workflow Completed",
+      "description": "Executing workflow_completed",
+      "status": "completed",
+      "timestamp": "2025-09-11T19:40:21.547128",
+      "agent_name": null,
+      "agent_reasoning": null,
+      "details": {
+        "final_decision": "APPROVED",
+        "reason": "All agents completed successfully",
+        "cosmos_status_updated": true,
+        "extracted_data_created": true
+      },
+      "duration_ms": null
+    }
   ]
 }

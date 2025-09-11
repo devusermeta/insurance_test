@@ -150,7 +150,7 @@ async def test_intake_clarifier():
                 "bill_amount": 88.0, 
                 "medical_condition": "Type 2 diabetes"
             },
-            "expected": "rejected_name_mismatch"
+            "expected": "declined_name_mismatch"
         },
         {
             "name": "Amount Mismatch (Should Reject)",
@@ -164,7 +164,7 @@ async def test_intake_clarifier():
                 "bill_amount": 150.0,
                 "medical_condition": "Type 2 diabetes"
             },
-            "expected": "rejected_amount_mismatch"
+            "expected": "declined_amount_mismatch"
         }
     ]
     
