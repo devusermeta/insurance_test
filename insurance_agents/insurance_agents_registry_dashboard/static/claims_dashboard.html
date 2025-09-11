@@ -1006,7 +1006,7 @@
             loadClaims();
             loadProcessingSteps(); // Start with Processing Steps view
             
-            // Real-time updates for intelligent orchestrator (faster refresh)
+            // Periodic updates for claims data (60 second refresh)
             setInterval(() => {
                 refreshClaims();
                 
@@ -1016,7 +1016,7 @@
                 } else {
                     loadProcessingSteps();
                 }
-            }, 5000); // Update every 5 seconds for better real-time experience
+            }, 60000); // Update every 60 seconds for periodic refresh
             
             console.log('✅ Intelligent Claims Dashboard ready!');
         });
@@ -1252,8 +1252,9 @@
                 case 'error':
                 case 'rejected':
                     return { class: 'failed', display: 'FAILED', action: 'Retry' };
-                case 'pending':
                 case 'submitted':
+                    return { class: 'pending', display: 'SUBMITTED', action: 'Process' };
+                case 'pending':
                 default:
                     return { class: 'pending', display: 'PENDING', action: 'Process' };
             }

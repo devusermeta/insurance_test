@@ -399,129 +399,96 @@ async def refresh_agent_status_periodically():
             await asyncio.sleep(10)  # Wait 10 seconds on error
 
 async def load_sample_claims():
-    """Load REAL claims from Cosmos DB via MCP server - NEW DATABASE STRUCTURE"""
+    """Load REAL claims directly from Cosmos DB - claim_details container"""
     try:
-        terminal_logger.log("COSMOS", "LOADING", "Loading real patient data from insurance.patient_details...")
+        terminal_logger.log("COSMOS", "LOADING", "Loading claims data directly from Cosmos DB claim_details container...")
         
-        # Call MCP server to get real patient data from new database structure
-        import uuid
-        mcp_payload = {
-            "jsonrpc": "2.0",
-            "id": str(uuid.uuid4()),
-            "method": "tools/call",
-            "params": {
-                "name": "query_cosmos",
-                "arguments": {
-                    "collection": "patient_details",  # New container name
-                    "query": "SELECT * FROM c",
-                    "max_items": 50
-                }
-            }
-        }
+        # Import Cosmos DB client
+        from azure.cosmos import CosmosClient
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "http://localhost:8080/mcp",
-                json=mcp_payload,
-                headers={"Content-Type": "application/json"},
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as response:
-                
-                if response.status == 200:
-                    data = await response.json()
-                    terminal_logger.log("COSMOS", "SUCCESS", "Successfully retrieved real patient data from Cosmos")
-                    
-                    # Parse real patient data from new structure
-                    if "result" in data and "content" in data["result"]:
-                        items = data["result"]["content"]
-                        if isinstance(items, list):
-                            for item in items:
-                                # Create ClaimStatus from real Cosmos patient data - no more fallback needed!
-                                claim = ClaimStatus(
-                                    claimId=item.get("claimId", "Unknown"),
-                                    status=item.get("status", "submitted"),
-                                    category=item.get("category", "Unknown"),
-                                    amountBilled=float(item.get("amountBilled", 0)),
-                                    submitDate=item.get("submitDate", ""),
-                                    lastUpdate=item.get("lastUpdate", datetime.now().isoformat()),
-                                    assignedEmployee=item.get("assignedEmployee"),
-                                    # Real patient data - no more undefined values!
-                                    patientName=item.get("patientName", "Unknown Patient"),
-                                    provider=item.get("provider", "Unknown Provider"),
-                                    memberId=item.get("memberId", "Unknown"),
-                                    region=item.get("region", "US")
-                                )
-                                active_claims[claim.claimId] = claim
-                                terminal_logger.log("COSMOS", "LOAD", f"Loaded REAL patient: {claim.patientName} - {claim.claimId} - ${claim.amountBilled} ({item.get('provider', 'N/A')})")
-                            
-                            terminal_logger.log("SUCCESS", "COSMOS", f"Loaded {len(items)} real patient records from insurance.patient_details")
-                            return
-                    
-                    terminal_logger.log("WARNING", "COSMOS", "No patient data found in Cosmos response")
-                
-                else:
-                    terminal_logger.log("ERROR", "COSMOS", f"MCP server returned {response.status}")
+        # Get Cosmos DB connection details from environment
+        cosmos_endpoint = os.getenv("COSMOS_ENDPOINT")
+        cosmos_key = os.getenv("COSMOS_KEY") 
+        database_name = os.getenv("COSMOS_DATABASE", "insurance")
+        container_name = "claim_details"  # Updated to correct container name
+        
+        if not cosmos_endpoint or not cosmos_key:
+            terminal_logger.log("ERROR", "COSMOS", "Missing COSMOS_ENDPOINT or COSMOS_KEY environment variables")
+            raise ValueError("Cosmos DB credentials not configured")
+        
+        # Create Cosmos client and query claims directly
+        client = CosmosClient(cosmos_endpoint, cosmos_key)
+        database = client.get_database_client(database_name)
+        container = database.get_container_client(container_name)
+        
+        # Query all claims from claim_details container
+        query = "SELECT * FROM c"
+        items = list(container.query_items(query=query, enable_cross_partition_query=True))
+        
+        terminal_logger.log("COSMOS", "SUCCESS", f"Successfully retrieved {len(items)} claims from claim_details container")
+        
+        # Clear existing claims
+        active_claims.clear()
+        
+        # Process each claim document from Cosmos DB
+        for item in items:
+            # Map Cosmos DB fields to ClaimStatus model
+            # Use actual status from Cosmos DB document
+            cosmos_status = item.get("status", "submitted")
+            
+            claim = ClaimStatus(
+                claimId=item.get("claimId") or item.get("id", "Unknown"),
+                status=cosmos_status,  # Use actual status from Cosmos DB
+                category=item.get("category", "Unknown"),
+                amountBilled=float(item.get("billAmount", 0)),  # Map billAmount -> amountBilled
+                submitDate=item.get("billDate", ""),  # Map billDate -> submitDate
+                lastUpdate=item.get("lastUpdatedAt", datetime.now().isoformat()),  # Map lastUpdatedAt -> lastUpdate
+                assignedEmployee=item.get("assignedEmployeeName"),  # Map assignedEmployeeName -> assignedEmployee
+                patientName=item.get("patientName", "Unknown Patient"),
+                provider=determine_provider_from_claim(item),  # Derive provider from claim data
+                memberId=item.get("memberId", "Unknown"),
+                region=item.get("region", "US")
+            )
+            
+            active_claims[claim.claimId] = claim
+            terminal_logger.log("COSMOS", "LOAD", f"Loaded claim: {claim.claimId} - {claim.patientName} - ${claim.amountBilled} ({claim.category})")
+        
+        terminal_logger.log("SUCCESS", "COSMOS", f"Loaded {len(items)} real claims from Cosmos DB claim_details container")
+        return
     
     except Exception as e:
-        terminal_logger.log("ERROR", "COSMOS", f"Failed to load real patient data: {str(e)}")
+        terminal_logger.log("ERROR", "COSMOS", f"Failed to load claims from Cosmos DB: {str(e)}")
         terminal_logger.log("ERROR", "COSMOS", "Make sure:")
-        terminal_logger.log("ERROR", "COSMOS", "1. Cosmos DB is configured with 'insurance' database")
-        terminal_logger.log("ERROR", "COSMOS", "2. 'patient_details' container exists with data")
-        terminal_logger.log("ERROR", "COSMOS", "3. MCP server is running on port 8080")
-        terminal_logger.log("ERROR", "COSMOS", "4. Run: python setup_cosmos_db.py to populate database")
-        # Fallback to sample data if Cosmos fails
-    terminal_logger.log("WARNING", "FALLBACK", "Using fallback sample claims")
-    sample_claims = [
-        {
-            "claimId": "OP-1001",
-            "status": "submitted",
-            "category": "Outpatient", 
-            "amountBilled": 180.0,
-            "submitDate": "2025-08-21",
-            "lastUpdate": datetime.now().isoformat(),
-            "assignedEmployee": None,
-            "patientName": "John Smith",
-            "provider": "CLN-ALPHA",
-            "memberId": "M-001",
-            "region": "US"
-        },
-        {
-            "claimId": "OP-1002", 
-            "status": "processing",
-            "category": "Outpatient",
-            "amountBilled": 220.0,
-            "submitDate": "2025-08-19", 
-            "lastUpdate": datetime.now().isoformat(),
-            "assignedEmployee": "emp_001",
-            "patientName": "Jane Doe",
-            "provider": "CLN-BETA",
-            "memberId": "M-002",
-            "region": "US"
-        },
-        {
-            "claimId": "IP-2001",
-            "status": "approved", 
-            "category": "Inpatient",
-            "amountBilled": 14000.0,
-            "submitDate": "2025-08-10",
-            "lastUpdate": datetime.now().isoformat(),
-            "assignedEmployee": "emp_002",
-            "patientName": "Robert Johnson",
-            "provider": "HSP-GAMMA",
-            "memberId": "M-004",
-            "region": "US"
-        }
-    ]
-    
-    for claim_data in sample_claims:
-        claim = ClaimStatus(**claim_data)
-        active_claims[claim.claimId] = claim
-        terminal_logger.log("CLAIM", "LOAD", f"Loaded claim: {claim.claimId} - ${claim.amountBilled}")
+        terminal_logger.log("ERROR", "COSMOS", "1. COSMOS_ENDPOINT and COSMOS_KEY environment variables are set")
+        terminal_logger.log("ERROR", "COSMOS", "2. Cosmos DB 'insurance' database exists")
+        terminal_logger.log("ERROR", "COSMOS", "3. 'claim_details' container exists with data")
+        terminal_logger.log("ERROR", "COSMOS", "4. Azure Cosmos DB Python SDK is installed: pip install azure-cosmos")
+    # No fallback data - we only use real Cosmos DB data
+    terminal_logger.log("ERROR", "COSMOS", "No fallback data available. Please fix Cosmos DB connection.")
 
     # If we get here, Cosmos DB setup is needed - no more fallback sample data!
     terminal_logger.log("SETUP", "REQUIRED", "🔧 Cosmos DB setup required!")
     terminal_logger.log("SETUP", "REQUIRED", "Run: python setup_cosmos_db.py")
     terminal_logger.log("SETUP", "REQUIRED", "Then start MCP server and restart dashboard")
+
+
+def determine_provider_from_claim(cosmos_doc):
+    """Determine provider from Cosmos document based on category and service type"""
+    category = cosmos_doc.get("category", "").lower()
+    service_type = cosmos_doc.get("serviceType", "")
+    employee_id = cosmos_doc.get("assignedEmployeeID", "")
+    
+    # Create provider codes based on claim type and employee assignment
+    if "inpatient" in category:
+        # Hospital provider for inpatient claims
+        suffix = employee_id[-4:] if employee_id else "UNKNOWN"
+        return f"HSP-{suffix}"
+    elif "outpatient" in category:
+        # Clinic provider for outpatient claims  
+        suffix = employee_id[-4:] if employee_id else "UNKNOWN"
+        return f"CLN-{suffix}"
+    else:
+        return "PROVIDER-UNKNOWN"
 
 # API Endpoints
 
@@ -561,9 +528,28 @@ async def health_check():
 
 @app.get("/api/claims")
 async def get_claims():
-    """Get all active claims"""
+    """Get all active claims with frontend-compatible field names"""
+    claims_for_frontend = []
+    
+    for claim in active_claims.values():
+        # Map backend ClaimStatus fields to frontend expected field names
+        frontend_claim = {
+            "claimId": claim.claimId,
+            "status": claim.status,  # Already mapped (submitted -> pending) during loading
+            "category": claim.category,
+            "amount": claim.amountBilled,  # Map amountBilled -> amount
+            "submitted": claim.submitDate,  # Map submitDate -> submitted  
+            "lastUpdate": claim.lastUpdate,
+            "assignedEmployee": claim.assignedEmployee,
+            "patientName": claim.patientName,
+            "provider": claim.provider,
+            "memberId": claim.memberId,
+            "region": claim.region
+        }
+        claims_for_frontend.append(frontend_claim)
+    
     terminal_logger.log("INFO", "API", f"Retrieved {len(active_claims)} claims")
-    return {"claims": list(active_claims.values())}
+    return {"claims": claims_for_frontend}
 
 @app.get("/api/claims/{claim_id}")
 async def get_claim(claim_id: str):
@@ -574,6 +560,24 @@ async def get_claim(claim_id: str):
     
     terminal_logger.log("INFO", "API", f"Retrieved claim details: {claim_id}")
     return {"claim": active_claims[claim_id]}
+
+@app.post("/api/claims/refresh")
+async def refresh_claims():
+    """Manual refresh endpoint to reload claims from Cosmos DB"""
+    try:
+        terminal_logger.log("INFO", "API", "Manual refresh triggered - reloading claims from Cosmos DB")
+        await load_sample_claims()  # Reload from Cosmos DB
+        return {
+            "success": True, 
+            "message": f"Successfully refreshed {len(active_claims)} claims from Cosmos DB",
+            "count": len(active_claims)
+        }
+    except Exception as e:
+        terminal_logger.log("ERROR", "API", f"Failed to refresh claims: {str(e)}")
+        return {
+            "success": False, 
+            "message": f"Failed to refresh claims: {str(e)}"
+        }
 
 @app.get("/api/agents")
 async def get_agents():
