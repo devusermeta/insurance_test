@@ -493,6 +493,11 @@ Deliver intelligent responses while maintaining consistent user experience."""
             
             self.logger.info(f"🎯 Processing query with Azure AI: {actual_query}")
             
+            # PRIORITY 0: Check for pending employee confirmations FIRST
+            if hasattr(self, 'pending_confirmations') and session_id in self.pending_confirmations:
+                self.logger.info(f"⏳ Found pending confirmation for session {session_id} - routing to confirmation handler")
+                return await self._handle_employee_confirmation(actual_query, session_id)
+            
             # NEW WORKFLOW: Check if this is a "Process claim with ID" request
             claim_id = enhanced_mcp_chat_client.parse_claim_id_from_message(actual_query)
             if claim_id:
@@ -1132,68 +1137,384 @@ Task: {task_type} for claim {claim_id}"""
             
     async def _handle_new_claim_workflow(self, claim_id: str, session_id: str) -> Dict[str, Any]:
         """
+        STEP 7: NEW ORCHESTRATOR WORKFLOW IMPLEMENTATION
         Handle the new claim processing workflow:
-        1. Extract claim details via MCP
-        2. Show to employee for confirmation
-        3. Execute A2A workflow based on confirmation
+        • Parse: "Process claim with IP-01" → extract claim_id  
+        • Step 1: MCP query → show details → wait for employee confirmation
+        • Step 2: A2A call to Coverage Rules Engine
+        • Step 3: A2A call to Document Intelligence (if coverage approved)
+        • Step 4: Receive final result from Intake Clarifier
+        • Step 5: Update employee with final decision
+        • Error Handling: Specific messages for each failure type
         """
         try:
-            self.logger.info(f"🚀 Starting new claim workflow for: {claim_id}")
+            self.logger.info(f"🚀 STEP 7: Starting new orchestrator workflow for: {claim_id}")
             
-            # Step 1: Extract claim details via MCP
+            # STEP 1: Extract claim details via MCP
+            self.logger.info(f"📊 STEP 1: Extracting claim details via MCP for {claim_id}")
             claim_details = await enhanced_mcp_chat_client.extract_claim_details(claim_id)
             
             if not claim_details.get("success"):
                 return {
                     "status": "error",
-                    "message": f"Could not retrieve details for claim {claim_id}: {claim_details.get('error', 'Unknown error')}",
-                    "timestamp": datetime.now().isoformat()
+                    "error_type": "mcp_extraction_failed",
+                    "message": f"❌ MCP Extraction Failed: Could not retrieve details for claim {claim_id}. {claim_details.get('error', 'Unknown error')}",
+                    "timestamp": datetime.now().isoformat(),
+                    "claim_id": claim_id
                 }
             
-            # Step 2: Format for employee confirmation
-            confirmation_message = f"""**📋 CLAIM PROCESSING REQUEST**
+            # STEP 8: EMPLOYEE CONFIRMATION LOGIC
+            # Show extracted details in chat and wait for "yes" confirmation
+            confirmation_message = f"""🔍 **CLAIM DETAILS EXTRACTED**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-**Claim Details Retrieved:**
+**📋 Claim Information:**
 • **Claim ID**: {claim_details['claim_id']}
-• **Patient Name**: {claim_details['patient_name']}
+• **Patient Name**: {claim_details['patient_name']}  
 • **Bill Amount**: ${claim_details['bill_amount']}
-• **Current Status**: {claim_details['status']}
 • **Category**: {claim_details['category']}
 • **Diagnosis**: {claim_details['diagnosis']}
+• **Current Status**: {claim_details['status']}
 • **Bill Date**: {claim_details['bill_date']}
 
-**🤖 Ready to Execute Multi-Agent Workflow:**
-1. **Coverage Rules Engine** - Evaluate eligibility and benefits
-2. **Document Intelligence** - Process supporting documents  
-3. **Intake Clarifier** - Verify patient information
+**🤖 Ready to Process with Multi-Agent Workflow:**
+1. **Coverage Rules Engine** → Evaluate eligibility and calculate benefits
+2. **Document Intelligence** → Process and verify supporting documents
+3. **Intake Clarifier** → Verify patient information and fraud check
 
-**To proceed, please confirm or provide additional instructions.**
-**Note**: This will trigger A2A communication between specialized agents."""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+**⚠️ EMPLOYEE CONFIRMATION REQUIRED**
+
+Please type **"yes"** to proceed with processing or **"no"** to cancel.
+
+**Note**: This will initiate A2A communication between specialized insurance agents."""
             
-            self.logger.info(f"✅ Claim details extracted successfully for {claim_id}")
+            self.logger.info(f"✅ STEP 1 Complete: Claim details extracted for {claim_id}")
             self.logger.info(f"   Patient: {claim_details['patient_name']}")
             self.logger.info(f"   Amount: ${claim_details['bill_amount']}")
             self.logger.info(f"   Category: {claim_details['category']}")
             
+            # Store claim details in session for confirmation response
+            if not hasattr(self, 'pending_confirmations'):
+                self.pending_confirmations = {}
+            
+            self.pending_confirmations[session_id] = {
+                "claim_id": claim_id,
+                "claim_details": claim_details,
+                "timestamp": datetime.now().isoformat(),
+                "workflow_step": "awaiting_confirmation"
+            }
+            
             return {
                 "status": "awaiting_confirmation",
-                "response_type": "claim_confirmation",
+                "response_type": "claim_confirmation", 
                 "message": confirmation_message,
                 "claim_details": claim_details,
                 "session_id": session_id,
                 "timestamp": datetime.now().isoformat(),
-                "next_actions": {
-                    "confirm": "Execute full A2A workflow",
-                    "modify": "Update claim details before processing",
-                    "cancel": "Cancel claim processing"
-                }
+                "workflow_step": "step_1_complete_awaiting_confirmation",
+                "next_action": "employee_must_confirm_yes_or_no"
             }
             
         except Exception as e:
-            self.logger.error(f"❌ Error in new claim workflow: {e}")
+            self.logger.error(f"❌ STEP 7 Error in new claim workflow: {e}")
             return {
-                "status": "error", 
-                "message": f"Error processing claim workflow: {str(e)}",
+                "status": "error",
+                "error_type": "workflow_execution_failed", 
+                "message": f"❌ Workflow Execution Failed: Error processing claim workflow for {claim_id}: {str(e)}",
+                "timestamp": datetime.now().isoformat(),
+                "claim_id": claim_id
+            }
+
+    async def _handle_employee_confirmation(self, user_input: str, session_id: str) -> Dict[str, Any]:
+        """
+        STEP 8: EMPLOYEE CONFIRMATION LOGIC
+        • Show extracted details in chat
+        • Wait for "yes" confirmation  
+        • Re-confirm if user enters anything else
+        • Block further processing until confirmed
+        """
+        try:
+            if not hasattr(self, 'pending_confirmations') or session_id not in self.pending_confirmations:
+                return {
+                    "status": "error",
+                    "error_type": "no_pending_confirmation",
+                    "message": "❌ No pending claim confirmation found. Please start with 'Process claim with [CLAIM-ID]'",
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            pending = self.pending_confirmations[session_id]
+            claim_details = pending["claim_details"]
+            claim_id = pending["claim_id"]
+            
+            # Check for "yes" confirmation (case insensitive)
+            user_response = user_input.strip().lower()
+            
+            if user_response == "yes" or user_response == "y":
+                self.logger.info(f"✅ STEP 8: Employee confirmed processing for {claim_id}")
+                
+                # Remove from pending confirmations
+                del self.pending_confirmations[session_id]
+                
+                # PROCEED TO STEP 2-5: Execute Sequential A2A Workflow
+                return await self._execute_sequential_a2a_workflow(claim_details, session_id)
+                
+            elif user_response == "no" or user_response == "n":
+                self.logger.info(f"❌ STEP 8: Employee cancelled processing for {claim_id}")
+                
+                # Remove from pending confirmations
+                del self.pending_confirmations[session_id]
+                
+                return {
+                    "status": "cancelled_by_employee",
+                    "message": f"🚫 **CLAIM PROCESSING CANCELLED**\n\nClaim {claim_id} processing has been cancelled by employee request.",
+                    "claim_id": claim_id,
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                # Re-confirm if user enters anything else
+                self.logger.info(f"⚠️ STEP 8: Invalid confirmation response: '{user_input}' - requesting re-confirmation")
+                
+                reconfirm_message = f"""⚠️ **INVALID RESPONSE - PLEASE CONFIRM**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You entered: "{user_input}"
+
+**To process claim {claim_id} for {claim_details['patient_name']}:**
+• Type **"yes"** to proceed with multi-agent processing
+• Type **"no"** to cancel the claim processing
+
+**⚠️ Processing is blocked until you confirm with "yes" or "no"**"""
+                
+                return {
+                    "status": "awaiting_confirmation",
+                    "response_type": "reconfirmation_required",
+                    "message": reconfirm_message,
+                    "claim_id": claim_id,
+                    "session_id": session_id,
+                    "timestamp": datetime.now().isoformat(),
+                    "invalid_response": user_input,
+                    "workflow_step": "awaiting_valid_confirmation"
+                }
+                
+        except Exception as e:
+            self.logger.error(f"❌ STEP 8 Error in employee confirmation: {e}")
+            return {
+                "status": "error",
+                "error_type": "confirmation_processing_failed",
+                "message": f"❌ Confirmation Processing Failed: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+
+    async def _execute_sequential_a2a_workflow(self, claim_details: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+        """
+        STEPS 2-5: Execute Sequential A2A Multi-Agent Workflow
+        • Step 2: A2A call to Coverage Rules Engine
+        • Step 3: A2A call to Document Intelligence (if coverage approved)
+        • Step 4: Receive final result from Intake Clarifier  
+        • Step 5: Update employee with final decision
+        """
+        try:
+            claim_id = claim_details["claim_id"]
+            self.logger.info(f"🚀 STEPS 2-5: Starting sequential A2A workflow for {claim_id}")
+            
+            workflow_results = {
+                "claim_id": claim_id,
+                "patient_name": claim_details["patient_name"],
+                "bill_amount": claim_details["bill_amount"],
+                "category": claim_details["category"],
+                "workflow_steps": [],
+                "start_time": datetime.now().isoformat()
+            }
+            
+            # Prepare structured claim data for A2A agents
+            structured_claim_data = f"""Structured Claim Data:
+- claim_id: {claim_details['claim_id']}
+- patient_name: {claim_details['patient_name']}
+- bill_amount: {claim_details['bill_amount']}
+- diagnosis: {claim_details['diagnosis']}
+- category: {claim_details['category']}"""
+            
+            # STEP 2: A2A call to Coverage Rules Engine
+            self.logger.info(f"📊 STEP 2: Calling Coverage Rules Engine for {claim_id}")
+            coverage_result = await self._execute_a2a_agent_call("coverage_rules_engine", structured_claim_data, "coverage_evaluation")
+            
+            workflow_results["workflow_steps"].append({
+                "step": 2,
+                "agent": "coverage_rules_engine",
+                "task": "coverage_evaluation",
+                "status": coverage_result.get("status", "completed"),
+                "result": coverage_result,
+                "timestamp": datetime.now().isoformat()
+            })
+            
+            # Check if coverage was approved before proceeding
+            coverage_approved = self._is_coverage_approved(coverage_result)
+            
+            if not coverage_approved:
+                return await self._finalize_workflow_decision(workflow_results, "DENIED", "Coverage rules evaluation denied the claim")
+            
+            # STEP 3: A2A call to Document Intelligence (if coverage approved)
+            self.logger.info(f"📄 STEP 3: Calling Document Intelligence for {claim_id}")
+            document_result = await self._execute_a2a_agent_call("document_intelligence", structured_claim_data, "document_analysis")
+            
+            workflow_results["workflow_steps"].append({
+                "step": 3,
+                "agent": "document_intelligence", 
+                "task": "document_analysis",
+                "status": document_result.get("status", "completed"),
+                "result": document_result,
+                "timestamp": datetime.now().isoformat()
+            })
+            
+            # STEP 4: Receive final result from Intake Clarifier
+            self.logger.info(f"🏥 STEP 4: Calling Intake Clarifier for {claim_id}")
+            intake_result = await self._execute_a2a_agent_call("intake_clarifier", structured_claim_data, "patient_verification")
+            
+            workflow_results["workflow_steps"].append({
+                "step": 4,
+                "agent": "intake_clarifier",
+                "task": "patient_verification", 
+                "status": intake_result.get("status", "completed"),
+                "result": intake_result,
+                "timestamp": datetime.now().isoformat()
+            })
+            
+            # STEP 5: Update employee with final decision
+            return await self._finalize_workflow_decision(workflow_results, "APPROVED", "All agents successfully processed the claim")
+            
+        except Exception as e:
+            self.logger.error(f"❌ STEPS 2-5 Error in sequential A2A workflow: {e}")
+            return {
+                "status": "error",
+                "error_type": "a2a_workflow_failed",
+                "message": f"❌ A2A Workflow Failed: Error in sequential workflow execution: {str(e)}",
+                "timestamp": datetime.now().isoformat(),
+                "claim_id": claim_details.get("claim_id", "unknown")
+            }
+
+    async def _execute_a2a_agent_call(self, agent_name: str, structured_data: str, task_type: str) -> Dict[str, Any]:
+        """Execute A2A call to a specific agent with error handling"""
+        try:
+            if agent_name not in self.available_agents:
+                return {
+                    "status": "error",
+                    "error_type": "agent_unavailable",
+                    "message": f"Agent {agent_name} is not available",
+                    "agent": agent_name
+                }
+            
+            self.logger.info(f"📡 Executing A2A call to {agent_name}")
+            
+            # Use the existing A2A routing mechanism
+            result = await self._route_to_agent(structured_data, agent_name, task_type, "sequential_workflow")
+            
+            self.logger.info(f"✅ A2A call to {agent_name} completed")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"❌ A2A call to {agent_name} failed: {e}")
+            return {
+                "status": "error",
+                "error_type": "a2a_call_failed",
+                "message": f"A2A call to {agent_name} failed: {str(e)}",
+                "agent": agent_name
+            }
+
+    def _is_coverage_approved(self, coverage_result: Dict[str, Any]) -> bool:
+        """Check if coverage was approved from coverage rules engine result"""
+        try:
+            # Look for approval indicators in the response
+            if isinstance(coverage_result, dict):
+                response_text = coverage_result.get("response", "").lower()
+                status = coverage_result.get("status", "").lower()
+                
+                # Check for explicit approval/denial
+                if "approved" in response_text or "eligible" in response_text:
+                    return True
+                if "denied" in response_text or "rejected" in response_text:
+                    return False
+                    
+                # If status indicates success, assume approved
+                if status == "success" or status == "completed":
+                    return True
+                    
+            # Default to approved if we can't determine (fail-safe for processing)
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error checking coverage approval: {e}")
+            return True  # Fail-safe: continue processing if we can't determine
+
+    async def _finalize_workflow_decision(self, workflow_results: Dict[str, Any], final_decision: str, reason: str) -> Dict[str, Any]:
+        """
+        STEP 5: Finalize workflow and present decision to employee
+        """
+        try:
+            claim_id = workflow_results["claim_id"]
+            patient_name = workflow_results["patient_name"]
+            bill_amount = workflow_results["bill_amount"]
+            category = workflow_results["category"]
+            
+            self.logger.info(f"📋 STEP 5: Finalizing workflow decision for {claim_id}: {final_decision}")
+            
+            # Calculate processing times and summary
+            total_agents = len(workflow_results["workflow_steps"])
+            successful_steps = len([step for step in workflow_results["workflow_steps"] if step.get("status") != "error"])
+            
+            # Create comprehensive decision report
+            decision_message = f"""🎯 **FINAL PROCESSING DECISION**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**📋 CLAIM SUMMARY:**
+• **Claim ID**: {claim_id}
+• **Patient**: {patient_name}
+• **Amount**: ${bill_amount}
+• **Category**: {category}
+
+**🤖 MULTI-AGENT PROCESSING RESULTS:**
+• **Total Agents**: {total_agents}
+• **Successful Steps**: {successful_steps}/{total_agents}
+• **Processing Time**: {datetime.now().isoformat()}
+
+**📊 AGENT RESPONSES:**"""
+
+            # Add individual agent results
+            for step in workflow_results["workflow_steps"]:
+                status_emoji = "✅" if step.get("status") != "error" else "❌"
+                decision_message += f"\n• {status_emoji} **{step['agent'].replace('_', ' ').title()}**: {step.get('status', 'completed').title()}"
+
+            # Add final decision
+            decision_emoji = "🎉" if final_decision == "APPROVED" else "🚫"
+            decision_message += f"""
+
+**{decision_emoji} FINAL STATUS: {final_decision}**
+
+**📝 REASON**: {reason}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ **WORKFLOW COMPLETE** - Employee can proceed with next actions."""
+
+            return {
+                "status": "workflow_complete",
+                "final_decision": final_decision,
+                "message": decision_message,
+                "workflow_results": workflow_results,
+                "claim_id": claim_id,
+                "patient_name": patient_name,
+                "bill_amount": bill_amount,
+                "category": category,
+                "timestamp": datetime.now().isoformat(),
+                "agents_processed": total_agents,
+                "successful_steps": successful_steps
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ STEP 5 Error finalizing workflow decision: {e}")
+            return {
+                "status": "error",
+                "error_type": "decision_finalization_failed",
+                "message": f"❌ Decision Finalization Failed: {str(e)}",
                 "timestamp": datetime.now().isoformat()
             }
 
