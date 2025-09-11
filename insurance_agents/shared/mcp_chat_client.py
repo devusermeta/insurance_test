@@ -492,6 +492,191 @@ NATURAL LANGUAGE ANSWER:"""
             self.logger.warning(f"Failed to format database response: {e}")
             return f"Here's what I found:\n\n{raw_result}"
 
+    async def extract_claim_details(self, claim_id: str) -> Dict[str, Any]:
+        """
+        Extract specific claim details needed for the new workflow step 1
+        Returns: patient name, bill amount, status, diagnosis, category
+        """
+        try:
+            self.logger.info(f"🔍 Extracting details for claim: {claim_id}")
+            
+            if not self.session_id:
+                await self._initialize_mcp_session()
+            
+            # Create SQL query to get specific claim fields
+            sql_query = f"""
+                SELECT c.claimId, c.patientName, c.billAmount, c.status, c.diagnosis, c.category, c.billDate
+                FROM c 
+                WHERE c.claimId = '{claim_id}'
+            """
+            
+            self.logger.info(f"📋 Executing claim extraction query for {claim_id}")
+            
+            # Use MCP tool to query Cosmos DB
+            result = await self._call_mcp_tool("query_cosmos", {"query": sql_query})
+            
+            # Parse the result
+            if result and result != "Error calling tool":
+                try:
+                    # Handle different result formats
+                    if isinstance(result, str):
+                        # Check if it's formatted text output from MCP server
+                        if "Results:" in result and "Document " in result:
+                            # Parse the formatted text response
+                            claim_data = self._parse_formatted_mcp_result(result)
+                            if not claim_data:
+                                return {"success": False, "error": f"Could not extract data from MCP result for claim {claim_id}"}
+                        else:
+                            # Try to parse as JSON
+                            try:
+                                parsed_result = json.loads(result)
+                                if isinstance(parsed_result, list) and len(parsed_result) > 0:
+                                    claim_data = parsed_result[0]
+                                elif isinstance(parsed_result, dict):
+                                    claim_data = parsed_result
+                                else:
+                                    return {"success": False, "error": f"Unexpected JSON format for claim {claim_id}"}
+                            except json.JSONDecodeError:
+                                # If not JSON, it might be plain text - handle gracefully
+                                if "not found" in result.lower() or "no results" in result.lower():
+                                    return {"success": False, "error": f"Claim {claim_id} not found"}
+                                return {"success": False, "error": f"Could not parse result: {result}"}
+                    else:
+                        # Handle non-string results
+                        if isinstance(result, list) and len(result) > 0:
+                            claim_data = result[0]
+                        elif isinstance(result, dict):
+                            claim_data = result
+                        else:
+                            return {"success": False, "error": f"Unexpected result type for claim {claim_id}"}
+                    
+                    # Format the extracted details
+                    extracted_details = {
+                        "success": True,
+                        "claim_id": claim_data.get("claimId", claim_id),
+                        "patient_name": claim_data.get("patientName", "Unknown"),
+                        "bill_amount": claim_data.get("billAmount", 0),
+                        "status": claim_data.get("status", "Unknown"),
+                        "diagnosis": claim_data.get("diagnosis", "Unknown"),
+                        "category": claim_data.get("category", "Unknown"),
+                        "bill_date": claim_data.get("billDate", "Unknown")
+                    }
+                    
+                    self.logger.info(f"✅ Successfully extracted details for claim {claim_id}")
+                    self.logger.info(f"   Patient: {extracted_details['patient_name']}")
+                    self.logger.info(f"   Amount: ${extracted_details['bill_amount']}")
+                    self.logger.info(f"   Status: {extracted_details['status']}")
+                    self.logger.info(f"   Category: {extracted_details['category']}")
+                    
+                    return extracted_details
+                    
+                except Exception as parse_error:
+                    self.logger.error(f"Error parsing claim data: {parse_error}")
+                    return {"success": False, "error": f"Could not parse claim data: {str(parse_error)}"}
+            else:
+                return {"success": False, "error": f"No data returned for claim {claim_id}"}
+                
+        except Exception as e:
+            self.logger.error(f"Error extracting claim details for {claim_id}: {e}")
+            return {"success": False, "error": f"Failed to extract claim details: {str(e)}"}
+
+    def _parse_formatted_mcp_result(self, result: str) -> Optional[Dict[str, Any]]:
+        """
+        Parse formatted MCP server result text into structured data
+        Expected format:
+        Results:
+        --------------------------------------------------
+        
+        Document 1:
+          claimId: OP-05
+          patientName: John Doe
+          billAmount: 88
+          status: submitted
+          diagnosis: Type 2 diabetes
+          category: Outpatient
+          billDate: 2025-07-15
+        """
+        try:
+            import re
+            
+            # Find the document section
+            doc_pattern = r"Document \d+:\s*(.*?)(?=Document \d+:|$)"
+            doc_match = re.search(doc_pattern, result, re.DOTALL)
+            
+            if not doc_match:
+                self.logger.warning("No document section found in MCP result")
+                return None
+            
+            doc_content = doc_match.group(1).strip()
+            
+            # Parse key-value pairs
+            claim_data = {}
+            lines = doc_content.split('\n')
+            
+            for line in lines:
+                line = line.strip()
+                if ':' in line and not line.startswith('--'):
+                    key, value = line.split(':', 1)
+                    key = key.strip()
+                    value = value.strip()
+                    
+                    # Convert to expected field names and types
+                    if key == "claimId":
+                        claim_data["claimId"] = value
+                    elif key == "patientName":
+                        claim_data["patientName"] = value
+                    elif key == "billAmount":
+                        try:
+                            claim_data["billAmount"] = float(value)
+                        except ValueError:
+                            claim_data["billAmount"] = 0
+                    elif key == "status":
+                        claim_data["status"] = value
+                    elif key == "diagnosis":
+                        claim_data["diagnosis"] = value
+                    elif key == "category":
+                        claim_data["category"] = value
+                    elif key == "billDate":
+                        claim_data["billDate"] = value
+            
+            if claim_data:
+                self.logger.info(f"🔧 Parsed MCP formatted result: {len(claim_data)} fields")
+                return claim_data
+            else:
+                self.logger.warning("No data extracted from MCP result")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Error parsing formatted MCP result: {e}")
+            return None
+
+    def parse_claim_id_from_message(self, user_message: str) -> Optional[str]:
+        """
+        Parse claim ID from user message like 'Process claim with IP-01' or 'Process claim IP-01'
+        Returns the claim ID if found, None otherwise
+        """
+        import re
+        
+        # Pattern to match claim IDs like IP-01, OP-05, etc.
+        # Common patterns: "with IP-01", "claim IP-01", "ID IP-01", etc.
+        patterns = [
+            r'(?:with|claim|id)\s+([A-Z]{2}-\d{2,3})',  # "with IP-01", "claim OP-05"
+            r'([A-Z]{2}-\d{2,3})',  # Direct match "IP-01"
+        ]
+        
+        message_lower = user_message.lower()
+        original_message = user_message  # Keep original for case-sensitive matching
+        
+        for pattern in patterns:
+            match = re.search(pattern, original_message, re.IGNORECASE)
+            if match:
+                claim_id = match.group(1).upper()
+                self.logger.info(f"🎯 Parsed claim ID from message: {claim_id}")
+                return claim_id
+        
+        self.logger.warning(f"⚠️ Could not parse claim ID from message: {user_message}")
+        return None
+
 # Singleton instance - this is the key pattern from the original system
 enhanced_mcp_chat_client = EnhancedMCPChatClient()
 
