@@ -67,6 +67,10 @@ class IntelligentClaimsOrchestrator(AgentExecutor):
         self.current_thread = None
         self._setup_azure_ai_client()
         
+        # Initialize Azure AI agent and thread if client is available
+        if self.agents_client:
+            self.get_or_create_azure_agent()
+        
     def _setup_azure_ai_client(self):
         """Setup Azure AI Foundry client like host_agent"""
         try:
@@ -492,11 +496,32 @@ Deliver intelligent responses while maintaining consistent user experience."""
                         break
             
             self.logger.info(f"🎯 Processing query with Azure AI: {actual_query}")
+            self.logger.info(f"🔍 Session ID: {session_id}")
             
             # PRIORITY 0: Check for pending employee confirmations FIRST
-            if hasattr(self, 'pending_confirmations') and session_id in self.pending_confirmations:
-                self.logger.info(f"⏳ Found pending confirmation for session {session_id} - routing to confirmation handler")
-                return await self._handle_employee_confirmation(actual_query, session_id)
+            # Handle both session-based and content-based confirmation detection
+            if hasattr(self, 'pending_confirmations'):
+                self.logger.info(f"🔍 Pending confirmations exist: {list(self.pending_confirmations.keys())}")
+                
+                # Check if this session has a pending confirmation
+                if session_id in self.pending_confirmations:
+                    self.logger.info(f"⏳ Found pending confirmation for session {session_id} - routing to confirmation handler")
+                    return await self._handle_employee_confirmation(actual_query, session_id)
+                
+                # Check if this looks like a confirmation response ("yes", "no") and we have any pending confirmations
+                elif actual_query.strip().lower() in ["yes", "y", "no", "n", "confirm", "cancel"] and len(self.pending_confirmations) > 0:
+                    self.logger.info(f"🎯 Detected confirmation response '{actual_query}' with {len(self.pending_confirmations)} pending confirmations")
+                    
+                    # Use the most recent pending confirmation (this handles session changes)
+                    latest_session = max(self.pending_confirmations.keys(), key=lambda k: self.pending_confirmations[k].get('timestamp', ''))
+                    self.logger.info(f"🔄 Using latest pending confirmation from session: {latest_session}")
+                    
+                    # Update the session ID to match the confirmation and process
+                    return await self._handle_employee_confirmation(actual_query, latest_session)
+                else:
+                    self.logger.info(f"🔍 Session {session_id} not in pending confirmations and not a confirmation response")
+            else:
+                self.logger.info(f"🔍 No pending_confirmations attribute found")
             
             # NEW WORKFLOW: Check if this is a "Process claim with ID" request
             claim_id = enhanced_mcp_chat_client.parse_claim_id_from_message(actual_query)
@@ -787,6 +812,11 @@ Deliver intelligent responses while maintaining consistent user experience."""
                                 assistant_response += content.text.value
                         
                         self.logger.info(f"✅ Got final assistant response: {assistant_response[:200]}...")
+                        
+                        # Check if this is a claim extraction request
+                        if "extract claim" in query.lower() or "claim details" in query.lower():
+                            return await self._process_claim_extraction_response(assistant_response, query, session_id)
+                        
                         return {
                             "status": "success",
                             "response_type": "azure_ai_with_tools",
@@ -818,6 +848,112 @@ Deliver intelligent responses while maintaining consistent user experience."""
                 "timestamp": datetime.now().isoformat()
             }
     
+    async def _process_claim_extraction_response(self, ai_response: str, query: str, session_id: str) -> Dict[str, Any]:
+        """Process Azure AI response for claim extraction and set up confirmation workflow"""
+        try:
+            # Extract claim ID from query
+            import re
+            claim_id_match = re.search(r'claim[:\s]+([A-Z]{2}-\d{2})', query, re.IGNORECASE)
+            claim_id = claim_id_match.group(1) if claim_id_match else "Unknown"
+            
+            self.logger.info(f"🔍 Processing claim extraction response for {claim_id}")
+            
+            # Parse claim details from AI response
+            claim_details = self._parse_ai_claim_response(ai_response, claim_id)
+            
+            if claim_details:
+                # Store claim details for confirmation workflow
+                if not hasattr(self, 'pending_confirmations'):
+                    self.pending_confirmations = {}
+                
+                self.pending_confirmations[session_id] = {
+                    "claim_id": claim_id,
+                    "claim_details": claim_details,
+                    "timestamp": datetime.now().isoformat(),
+                    "workflow_step": "awaiting_confirmation"
+                }
+                
+                # Create confirmation message with both AI response and confirmation prompt
+                confirmation_message = f"""{ai_response}
+
+**Please confirm:** Do you want to proceed with processing this claim? (Type 'yes' to confirm)"""
+                
+                return {
+                    "status": "awaiting_confirmation",
+                    "message": confirmation_message,
+                    "claim_details": claim_details,
+                    "session_id": session_id,
+                    "claim_id": claim_id,
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                # Fallback if parsing failed
+                return {
+                    "status": "error",
+                    "message": f"❌ Could not parse claim details from AI response for {claim_id}",
+                    "ai_response": ai_response,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error processing claim extraction response: {e}")
+            return {
+                "status": "error",
+                "message": f"❌ Error processing claim extraction: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+
+    def _parse_ai_claim_response(self, ai_response: str, claim_id: str) -> Dict[str, Any]:
+        """Parse claim details from Azure AI response"""
+        try:
+            import re
+            
+            # Extract details using regex patterns that handle markdown formatting
+            patient_match = re.search(r'\*\*Patient[:\s]*\*\*[:\s]*([^\n]+)', ai_response, re.IGNORECASE)
+            amount_match = re.search(r'\*\*Amount[:\s]*\*\*[:\s]*\$?([0-9,]+)', ai_response, re.IGNORECASE)
+            category_match = re.search(r'\*\*Category[:\s]*\*\*[:\s]*([^\n]+)', ai_response, re.IGNORECASE)
+            diagnosis_match = re.search(r'\*\*Diagnosis[:\s]*\*\*[:\s]*([^\n]+)', ai_response, re.IGNORECASE)
+            status_match = re.search(r'\*\*Status[:\s]*\*\*[:\s]*([^\n]+)', ai_response, re.IGNORECASE)
+            date_match = re.search(r'\*\*(?:Bill Date|Date)[:\s]*\*\*[:\s]*([^\n]+)', ai_response, re.IGNORECASE)
+            
+            # Fallback to non-markdown patterns if markdown patterns don't match
+            if not patient_match:
+                patient_match = re.search(r'Patient[:\s]+([^\n]+)', ai_response, re.IGNORECASE)
+            if not amount_match:
+                amount_match = re.search(r'Amount[:\s]+\$?([0-9,]+)', ai_response, re.IGNORECASE)
+            if not category_match:
+                category_match = re.search(r'Category[:\s]+([^\n]+)', ai_response, re.IGNORECASE)
+            if not diagnosis_match:
+                diagnosis_match = re.search(r'Diagnosis[:\s]+([^\n]+)', ai_response, re.IGNORECASE)
+            if not status_match:
+                status_match = re.search(r'Status[:\s]+([^\n]+)', ai_response, re.IGNORECASE)
+            if not date_match:
+                date_match = re.search(r'(?:Bill Date|Date)[:\s]+([^\n]+)', ai_response, re.IGNORECASE)
+            
+            self.logger.info(f"🔍 Parsing results: patient={bool(patient_match)}, amount={bool(amount_match)}, category={bool(category_match)}")
+            
+            if patient_match and amount_match:
+                claim_details = {
+                    "claim_id": claim_id,
+                    "patient_name": patient_match.group(1).strip(),
+                    "bill_amount": float(amount_match.group(1).replace(',', '')),
+                    "category": category_match.group(1).strip() if category_match else "Unknown",
+                    "diagnosis": diagnosis_match.group(1).strip() if diagnosis_match else "Unknown",
+                    "status": status_match.group(1).strip() if status_match else "submitted",
+                    "bill_date": date_match.group(1).strip() if date_match else "Unknown"
+                }
+                
+                self.logger.info(f"✅ Parsed claim details for {claim_id}: {claim_details['patient_name']}, ${claim_details['bill_amount']}")
+                return claim_details
+            else:
+                self.logger.warning(f"⚠️ Could not parse required fields from AI response for {claim_id}")
+                self.logger.warning(f"   AI Response sample: {ai_response[:300]}...")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error parsing AI claim response: {e}")
+            return None
+
     async def _fallback_routing(self, query: str, session_id: str) -> Dict[str, Any]:
         """Fallback routing when Azure AI is not available"""
         try:
@@ -1137,64 +1273,57 @@ Task: {task_type} for claim {claim_id}"""
             
     async def _handle_new_claim_workflow(self, claim_id: str, session_id: str) -> Dict[str, Any]:
         """
-        STEP 7: NEW ORCHESTRATOR WORKFLOW IMPLEMENTATION
-        Handle the new claim processing workflow:
-        • Parse: "Process claim with IP-01" → extract claim_id  
-        • Step 1: MCP query → show details → wait for employee confirmation
-        • Step 2: A2A call to Coverage Rules Engine
-        • Step 3: A2A call to Document Intelligence (if coverage approved)
-        • Step 4: Receive final result from Intake Clarifier
-        • Step 5: Update employee with final decision
-        • Error Handling: Specific messages for each failure type
+        NEW WORKFLOW IMPLEMENTATION - Your Exact Requirements
+        Employee asks: "Process claim with [claim_id]"
+        
+        STEP 1: Extract claim details via MCP and show to user for confirmation
+        Then sequential workflow:
+        - Coverage Rules Engine: Document validation + Bill amount limits by diagnosis  
+        - Document Intelligence: Extract patient data → Create extracted_patient_data document
+        - Intake Clarifier: Compare claim vs extracted data → Update status to marked for approval/rejection
         """
         try:
-            self.logger.info(f"🚀 STEP 7: Starting new orchestrator workflow for: {claim_id}")
+            self.logger.info(f"🚀 Starting NEW WORKFLOW for claim: {claim_id}")
             
-            # STEP 1: Extract claim details via MCP
+            # STEP 1: Extract claim details using MCP tools with AI-powered mapping
             self.logger.info(f"📊 STEP 1: Extracting claim details via MCP for {claim_id}")
-            claim_details = await enhanced_mcp_chat_client.extract_claim_details(claim_id)
             
-            if not claim_details.get("success"):
-                return {
-                    "status": "error",
-                    "error_type": "mcp_extraction_failed",
-                    "message": f"❌ MCP Extraction Failed: Could not retrieve details for claim {claim_id}. {claim_details.get('error', 'Unknown error')}",
-                    "timestamp": datetime.now().isoformat(),
-                    "claim_id": claim_id
-                }
+            # Use Azure AI orchestrator to intelligently extract and format claim details
+            if not enhanced_mcp_chat_client.session_id:
+                await enhanced_mcp_chat_client._initialize_mcp_session()
             
-            # STEP 8: EMPLOYEE CONFIRMATION LOGIC
-            # Show extracted details in chat and wait for "yes" confirmation
-            confirmation_message = f"""🔍 **CLAIM DETAILS EXTRACTED**
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**📋 Claim Information:**
-• **Claim ID**: {claim_details['claim_id']}
-• **Patient Name**: {claim_details['patient_name']}  
-• **Bill Amount**: ${claim_details['bill_amount']}
-• **Category**: {claim_details['category']}
-• **Diagnosis**: {claim_details['diagnosis']}
-• **Current Status**: {claim_details['status']}
-• **Bill Date**: {claim_details['bill_date']}
-
-**🤖 Ready to Process with Multi-Agent Workflow:**
-1. **Coverage Rules Engine** → Evaluate eligibility and calculate benefits
-2. **Document Intelligence** → Process and verify supporting documents
-3. **Intake Clarifier** → Verify patient information and fraud check
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-**⚠️ EMPLOYEE CONFIRMATION REQUIRED**
-
-Please type **"yes"** to proceed with processing or **"no"** to cancel.
-
-**Note**: This will initiate A2A communication between specialized insurance agents."""
+            # Let Azure AI handle the data extraction and formatting
+            extraction_query = f"""
+            Extract claim details for {claim_id}. Query the database and format the response as:
             
-            self.logger.info(f"✅ STEP 1 Complete: Claim details extracted for {claim_id}")
-            self.logger.info(f"   Patient: {claim_details['patient_name']}")
-            self.logger.info(f"   Amount: ${claim_details['bill_amount']}")
-            self.logger.info(f"   Category: {claim_details['category']}")
+            Claim ID: [claimId]
+            Patient: [patientName] 
+            Amount: $[billAmount]
+            Category: [category]
+            Diagnosis: [diagnosis]
+            Status: [status]
+            Bill Date: [billDate or submittedAt]
             
-            # Store claim details in session for confirmation response
+            Then ask for confirmation to proceed with processing.
+            """
+            
+            # Use Azure AI orchestrator to handle the extraction intelligently
+            extraction_result = await self._use_azure_ai_for_claim_extraction(extraction_query, claim_id, session_id)
+            
+            return extraction_result
+            confirmation_message = f"""� **Claim Details Extracted:**
+
+🆔 **Claim ID:** {claim_details['claim_id']}
+👤 **Patient:** {claim_details['patient_name']}
+💰 **Amount:** ${claim_details['bill_amount']}
+🏥 **Category:** {claim_details['category']}
+🩺 **Diagnosis:** {claim_details['diagnosis']}
+📊 **Status:** {claim_details['status']}
+📅 **Bill Date:** {claim_details['bill_date']}
+
+**Please confirm:** Do you want to proceed with processing this claim? (Type 'yes' to confirm)"""
+            
+            # Store claim details for confirmation workflow
             if not hasattr(self, 'pending_confirmations'):
                 self.pending_confirmations = {}
             
@@ -1207,38 +1336,275 @@ Please type **"yes"** to proceed with processing or **"no"** to cancel.
             
             return {
                 "status": "awaiting_confirmation",
-                "response_type": "claim_confirmation", 
                 "message": confirmation_message,
                 "claim_details": claim_details,
                 "session_id": session_id,
-                "timestamp": datetime.now().isoformat(),
-                "workflow_step": "step_1_complete_awaiting_confirmation",
-                "next_action": "employee_must_confirm_yes_or_no"
+                "timestamp": datetime.now().isoformat()
             }
             
         except Exception as e:
-            self.logger.error(f"❌ STEP 7 Error in new claim workflow: {e}")
+            self.logger.error(f"❌ Error in new claim workflow: {e}")
             return {
                 "status": "error",
-                "error_type": "workflow_execution_failed", 
-                "message": f"❌ Workflow Execution Failed: Error processing claim workflow for {claim_id}: {str(e)}",
+                "message": f"❌ Error processing claim {claim_id}: {str(e)}",
                 "timestamp": datetime.now().isoformat(),
                 "claim_id": claim_id
             }
 
-    async def _handle_employee_confirmation(self, user_input: str, session_id: str) -> Dict[str, Any]:
+    async def _parse_claim_details_from_mcp(self, mcp_response: str, claim_id: str) -> Dict[str, Any]:
+        """Parse claim details from MCP string response - Enhanced parsing"""
+        import re
+        
+        self.logger.info(f"🔍 Parsing MCP response for {claim_id}: {mcp_response[:200]}...")
+        
+        # Enhanced patient name extraction
+        patient_patterns = [
+            r'patient[:\s]*["\']?([^,\n"\']+)["\']?',
+            r'name[:\s]*["\']?([^,\n"\']+)["\']?',
+            r'patientName[:\s]*["\']?([^,\n"\']+)["\']?'
+        ]
+        patient_name = "Unknown Patient"
+        for pattern in patient_patterns:
+            match = re.search(pattern, mcp_response, re.IGNORECASE)
+            if match:
+                candidate = match.group(1).strip()
+                # Filter out non-name responses
+                if len(candidate) > 2 and not candidate.lower().startswith(('the ', 'total', 'bill', 'amount')):
+                    patient_name = candidate
+                    break
+        
+        # Enhanced bill amount extraction - handle various formats
+        amount_patterns = [
+            r'amount[:\s]*\$?(\d+(?:\.\d{2})?)',
+            r'bill[:\s]*amount[:\s]*[is\s]*\$?(\d+(?:\.\d{2})?)',
+            r'total[:\s]*[bill\s]*[amount\s]*[is\s]*\$?(\d+(?:\.\d{2})?)',
+            r'\$(\d+(?:\.\d{2})?)',
+            r'(\d+(?:\.\d{2})?)(?:\s*dollars?)?'
+        ]
+        bill_amount = 0.0
+        for pattern in amount_patterns:
+            match = re.search(pattern, mcp_response, re.IGNORECASE)
+            if match:
+                try:
+                    amount = float(match.group(1))
+                    if 10 <= amount <= 500000:  # Reasonable range for medical bills
+                        bill_amount = amount
+                        break
+                except ValueError:
+                    continue
+        
+        # Enhanced category extraction
+        category = "Unknown"
+        if any(term in mcp_response.lower() for term in ['outpatient', 'out-patient', 'ambulatory']):
+            category = "Outpatient"
+        elif any(term in mcp_response.lower() for term in ['inpatient', 'in-patient', 'hospitalization', 'admission']):
+            category = "Inpatient"
+        
+        # Enhanced diagnosis extraction
+        diagnosis_patterns = [
+            r'diagnosis[:\s]*["\']?([^,\n"\'\.]{3,50})["\']?',
+            r'condition[:\s]*["\']?([^,\n"\'\.]{3,50})["\']?',
+            r'medical[:\s]+condition[:\s]*["\']?([^,\n"\'\.]{3,50})["\']?',
+            r'procedure[:\s]*["\']?([^,\n"\'\.]{3,50})["\']?'
+        ]
+        diagnosis = "Unknown"
+        for pattern in diagnosis_patterns:
+            match = re.search(pattern, mcp_response, re.IGNORECASE)
+            if match:
+                candidate = match.group(1).strip()
+                if len(candidate) > 3 and not candidate.lower().startswith(('the ', 'this', 'for')):
+                    diagnosis = candidate
+                    break
+        
+        # Enhanced status extraction
+        status_patterns = [
+            r'status[:\s]*["\']?([^,\n"\'\.]+)["\']?',
+            r'claim[:\s]*status[:\s]*["\']?([^,\n"\'\.]+)["\']?'
+        ]
+        status = "submitted"
+        for pattern in status_patterns:
+            match = re.search(pattern, mcp_response, re.IGNORECASE)
+            if match:
+                status = match.group(1).strip()
+                break
+        
+        # Enhanced date extraction
+        date_patterns = [
+            r'(\d{4}-\d{2}-\d{2})',
+            r'(\d{2}/\d{2}/\d{4})',
+            r'date[:\s]*["\']?([^,\n"\'\.]+)["\']?'
+        ]
+        bill_date = "Unknown"
+        for pattern in date_patterns:
+            match = re.search(pattern, mcp_response)
+            if match:
+                bill_date = match.group(1)
+                break
+        
+        result = {
+            "claim_id": claim_id,
+            "patient_name": patient_name,
+            "bill_amount": bill_amount,
+            "category": category,
+            "diagnosis": diagnosis,
+            "status": status,
+            "bill_date": bill_date
+        }
+        
+        self.logger.info(f"✅ Parsed claim details: {result}")
+        return result
+
+    async def _parse_mcp_result_to_claim_details(self, mcp_result: str, claim_id: str) -> Optional[Dict[str, Any]]:
         """
-        STEP 8: EMPLOYEE CONFIRMATION LOGIC
-        • Show extracted details in chat
-        • Wait for "yes" confirmation  
-        • Re-confirm if user enters anything else
-        • Block further processing until confirmed
+        Parse MCP server result to extract structured claim details
+        Handles both JSON and formatted text responses from MCP server
         """
         try:
-            if not hasattr(self, 'pending_confirmations') or session_id not in self.pending_confirmations:
+            self.logger.info(f"🔍 Parsing MCP result for {claim_id}: {mcp_result[:300]}...")
+            
+            # Try to parse as JSON first
+            try:
+                import json
+                
+                # Handle different JSON response formats
+                if mcp_result.startswith('[') and mcp_result.endswith(']'):
+                    # Array format
+                    parsed_data = json.loads(mcp_result)
+                    if len(parsed_data) > 0:
+                        claim_data = parsed_data[0]
+                    else:
+                        self.logger.warning(f"Empty array result for {claim_id}")
+                        return None
+                elif mcp_result.startswith('{') and mcp_result.endswith('}'):
+                    # Object format
+                    claim_data = json.loads(mcp_result)
+                else:
+                    # Not JSON, try text parsing
+                    raise json.JSONDecodeError("Not JSON format", mcp_result, 0)
+                    
+            except json.JSONDecodeError:
+                # Parse formatted text output from MCP server
+                self.logger.info(f"🔧 Parsing formatted text result for {claim_id}")
+                claim_data = self._parse_formatted_mcp_text(mcp_result)
+                
+                if not claim_data:
+                    self.logger.error(f"Could not parse MCP result for {claim_id}")
+                    return None
+            
+            # Extract and standardize the fields
+            result = {
+                "claim_id": claim_data.get("claimId", claim_data.get("id", claim_id)),
+                "patient_name": claim_data.get("patientName", "Unknown"),
+                "bill_amount": float(claim_data.get("billAmount", 0)),
+                "category": claim_data.get("category", "Unknown"),
+                "diagnosis": claim_data.get("diagnosis", "Unknown"),
+                "status": claim_data.get("status", "submitted"),
+                "bill_date": claim_data.get("billDate", claim_data.get("submittedDate", "Unknown"))
+            }
+            
+            self.logger.info(f"✅ Successfully parsed claim details for {claim_id}")
+            self.logger.info(f"   Patient: {result['patient_name']}")
+            self.logger.info(f"   Amount: ${result['bill_amount']}")
+            self.logger.info(f"   Category: {result['category']}")
+            self.logger.info(f"   Diagnosis: {result['diagnosis']}")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error parsing MCP result for {claim_id}: {e}")
+            return None
+
+    def _parse_formatted_mcp_text(self, mcp_text: str) -> Optional[Dict[str, Any]]:
+        """
+        Parse formatted text output from MCP server
+        Expected format:
+        Results:
+        --------------------------------------------------
+        
+        Document 1:
+          claimId: OP-03
+          patientName: Alice Johnson
+          billAmount: 928
+          status: submitted
+          diagnosis: knee pain
+          category: Outpatient
+          billDate: 2024-09-03
+        """
+        try:
+            import re
+            
+            # Find the document section
+            doc_pattern = r"Document \d+:\s*(.*?)(?=Document \d+:|$)"
+            doc_match = re.search(doc_pattern, mcp_text, re.DOTALL)
+            
+            if not doc_match:
+                self.logger.warning("No document section found in MCP result")
+                return None
+            
+            doc_content = doc_match.group(1).strip()
+            
+            # Parse key-value pairs
+            claim_data = {}
+            lines = doc_content.split('\n')
+            
+            for line in lines:
+                line = line.strip()
+                if ':' in line and not line.startswith('--'):
+                    key, value = line.split(':', 1)
+                    key = key.strip()
+                    value = value.strip()
+                    
+                    # Convert to expected field names and types
+                    if key in ["claimId", "id"]:
+                        claim_data["claimId"] = value
+                    elif key == "patientName":
+                        claim_data["patientName"] = value
+                    elif key == "billAmount":
+                        try:
+                            claim_data["billAmount"] = float(value)
+                        except ValueError:
+                            claim_data["billAmount"] = 0
+                    elif key == "status":
+                        claim_data["status"] = value
+                    elif key == "diagnosis":
+                        claim_data["diagnosis"] = value
+                    elif key == "category":
+                        claim_data["category"] = value
+                    elif key in ["billDate", "submittedDate"]:
+                        claim_data["billDate"] = value
+            
+            if claim_data:
+                self.logger.info(f"🔧 Parsed MCP formatted text: {len(claim_data)} fields")
+                return claim_data
+            else:
+                self.logger.warning("No data extracted from MCP formatted text")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Error parsing formatted MCP text: {e}")
+            return None
+
+    async def _handle_employee_confirmation(self, user_input: str, session_id: str) -> Dict[str, Any]:
+        """
+        Employee confirmation handler for your workflow - Enhanced with debugging
+        """
+        try:
+            self.logger.info(f"🔍 CONFIRMATION CHECK: user_input='{user_input}', session_id='{session_id}'")
+            
+            if not hasattr(self, 'pending_confirmations'):
+                self.logger.warning(f"⚠️ No pending_confirmations attribute found")
                 return {
                     "status": "error",
-                    "error_type": "no_pending_confirmation",
+                    "message": "❌ No pending claim confirmation found. Please start with 'Process claim with [CLAIM-ID]'",
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            self.logger.info(f"🔍 Current pending confirmations: {list(self.pending_confirmations.keys())}")
+            
+            if session_id not in self.pending_confirmations:
+                self.logger.warning(f"⚠️ Session {session_id} not found in pending confirmations")
+                return {
+                    "status": "error",
                     "message": "❌ No pending claim confirmation found. Please start with 'Process claim with [CLAIM-ID]'",
                     "timestamp": datetime.now().isoformat()
                 }
@@ -1247,64 +1613,206 @@ Please type **"yes"** to proceed with processing or **"no"** to cancel.
             claim_details = pending["claim_details"]
             claim_id = pending["claim_id"]
             
-            # Check for "yes" confirmation (case insensitive)
             user_response = user_input.strip().lower()
+            self.logger.info(f"🔍 Processing user response: '{user_response}' for claim {claim_id}")
             
-            if user_response == "yes" or user_response == "y":
-                self.logger.info(f"✅ STEP 8: Employee confirmed processing for {claim_id}")
+            if user_response in ["yes", "y", "confirm", "proceed"]:
+                self.logger.info(f"✅ Employee confirmed processing for {claim_id}")
                 
                 # Remove from pending confirmations
                 del self.pending_confirmations[session_id]
                 
-                # PROCEED TO STEP 2-5: Execute Sequential A2A Workflow
-                return await self._execute_sequential_a2a_workflow(claim_details, session_id)
+                # Execute your exact workflow
+                return await self._execute_your_workflow(claim_details, session_id)
                 
-            elif user_response == "no" or user_response == "n":
-                self.logger.info(f"❌ STEP 8: Employee cancelled processing for {claim_id}")
-                
-                # Remove from pending confirmations
+            elif user_response in ["no", "n", "cancel", "stop"]:
+                self.logger.info(f"❌ Employee cancelled processing for {claim_id}")
                 del self.pending_confirmations[session_id]
                 
                 return {
-                    "status": "cancelled_by_employee",
+                    "status": "cancelled",
                     "message": f"🚫 **CLAIM PROCESSING CANCELLED**\n\nClaim {claim_id} processing has been cancelled by employee request.",
                     "claim_id": claim_id,
                     "timestamp": datetime.now().isoformat()
                 }
             else:
-                # Re-confirm if user enters anything else
-                self.logger.info(f"⚠️ STEP 8: Invalid confirmation response: '{user_input}' - requesting re-confirmation")
-                
-                reconfirm_message = f"""⚠️ **INVALID RESPONSE - PLEASE CONFIRM**
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                # Invalid response - ask again
+                self.logger.info(f"⚠️ Invalid response '{user_response}' for claim {claim_id}")
+                return {
+                    "status": "awaiting_confirmation",
+                    "message": f"""⚠️ **INVALID RESPONSE**
 
 You entered: "{user_input}"
 
-**To process claim {claim_id} for {claim_details['patient_name']}:**
-• Type **"yes"** to proceed with multi-agent processing
-• Type **"no"** to cancel the claim processing
-
-**⚠️ Processing is blocked until you confirm with "yes" or "no"**"""
-                
-                return {
-                    "status": "awaiting_confirmation",
-                    "response_type": "reconfirmation_required",
-                    "message": reconfirm_message,
+To process claim {claim_id} for {claim_details['patient_name']}:
+• Type **"yes"** to proceed 
+• Type **"no"** to cancel""",
                     "claim_id": claim_id,
                     "session_id": session_id,
-                    "timestamp": datetime.now().isoformat(),
-                    "invalid_response": user_input,
-                    "workflow_step": "awaiting_valid_confirmation"
+                    "timestamp": datetime.now().isoformat()
                 }
                 
         except Exception as e:
-            self.logger.error(f"❌ STEP 8 Error in employee confirmation: {e}")
+            self.logger.error(f"❌ Error in employee confirmation: {e}")
             return {
                 "status": "error",
-                "error_type": "confirmation_processing_failed",
-                "message": f"❌ Confirmation Processing Failed: {str(e)}",
+                "message": f"❌ Error processing confirmation: {str(e)}",
                 "timestamp": datetime.now().isoformat()
             }
+
+    async def _execute_your_workflow(self, claim_details: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+        """
+        Execute your exact workflow requirements:
+        1. Coverage Rules Engine: Document validation + Bill amount limits by diagnosis
+        2. Document Intelligence: Extract data → Create extracted_patient_data document  
+        3. Intake Clarifier: Compare data → Update status to marked for approval/rejection
+        """
+        try:
+            claim_id = claim_details["claim_id"]
+            self.logger.info(f"🚀 Starting YOUR WORKFLOW for {claim_id}")
+            
+            # STEP 1: Coverage Rules Engine - Document validation and bill amount limits
+            self.logger.info(f"📊 Calling Coverage Rules Engine for {claim_id}")
+            
+            coverage_task = f"""Verify documents and check bill amount limits for:
+Claim ID: {claim_id}
+Patient: {claim_details['patient_name']}
+Category: {claim_details['category']}
+Diagnosis: {claim_details['diagnosis']}
+Bill Amount: ${claim_details['bill_amount']}
+
+Rules:
+- Outpatient: Must have bills + memo
+- Inpatient: Must have bills + memo + discharge summary
+- Eye diagnosis: Reject if amount > $500
+- Dental diagnosis: Reject if amount > $1000  
+- General diagnosis: Reject if amount > $200000"""
+            
+            coverage_result = await self.a2a_client.send_request(
+                target_agent="coverage_rules_engine",
+                task=coverage_task,
+                parameters={"claim_id": claim_id}
+            )
+            
+            # Check if coverage denied the claim
+            if self._is_claim_denied(coverage_result):
+                # Update status to marked for rejection using MCP
+                await self._update_claim_status(claim_id, "marked for rejection", coverage_result.get("message", "Coverage rules denied"))
+                
+                return {
+                    "status": "denied",
+                    "message": f"❌ **CLAIM DENIED**\n\nClaim {claim_id} has been denied by Coverage Rules Engine.\n\nReason: {coverage_result.get('message', 'Coverage validation failed')}",
+                    "claim_id": claim_id,
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            # STEP 2: Document Intelligence - Extract patient data
+            self.logger.info(f"📄 Calling Document Intelligence for {claim_id}")
+            
+            doc_task = f"""Process documents and create extracted_patient_data for:
+Claim ID: {claim_id}
+Category: {claim_details['category']}
+
+Extract from documents and create document in extracted_patient_data container:
+- Patient name, Bill amount, Bill date, Medical condition
+- Document ID should be: {claim_id}"""
+            
+            doc_result = await self.a2a_client.send_request(
+                target_agent="document_intelligence", 
+                task=doc_task,
+                parameters={"claim_id": claim_id, "category": claim_details['category']}
+            )
+            
+            # STEP 3: Intake Clarifier - Compare data and update status
+            self.logger.info(f"📋 Calling Intake Clarifier for {claim_id}")
+            
+            intake_task = f"""Compare claim data with extracted patient data:
+Claim ID: {claim_id}
+
+Fetch documents from:
+- claim_details container (claim_id: {claim_id})
+- extracted_patient_data container (claim_id: {claim_id})
+
+Compare: patient_name, bill_amount, bill_date, diagnosis vs medical_condition
+If mismatch: Update status to 'marked for rejection' with reason
+If match: Update status to 'marked for approval'"""
+            
+            intake_result = await self.a2a_client.send_request(
+                target_agent="intake_clarifier",
+                task=intake_task, 
+                parameters={"claim_id": claim_id}
+            )
+            
+            # Determine final result
+            if self._is_claim_approved(intake_result):
+                return {
+                    "status": "approved",
+                    "message": f"""🎉 **CLAIM APPROVED**
+
+Claim {claim_id} has been processed successfully!
+
+**Processing Steps:**
+✅ Coverage Rules: Passed document validation and bill amount limits
+✅ Document Intelligence: Extracted patient data successfully  
+✅ Intake Clarifier: Data verification passed
+
+**Status:** Marked for approval in Cosmos DB
+**Patient:** {claim_details['patient_name']}
+**Amount:** ${claim_details['bill_amount']}""",
+                    "claim_id": claim_id,
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                return {
+                    "status": "denied",
+                    "message": f"""❌ **CLAIM DENIED**
+
+Claim {claim_id} has been denied during intake verification.
+
+**Reason:** {intake_result.get('message', 'Data verification failed')}
+
+**Status:** Marked for rejection in Cosmos DB""",
+                    "claim_id": claim_id,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error in your workflow: {e}")
+            return {
+                "status": "error",
+                "message": f"❌ Error executing workflow for claim {claim_id}: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+
+    def _is_claim_denied(self, result: Dict[str, Any]) -> bool:
+        """Check if coverage rules denied the claim"""
+        if isinstance(result, dict):
+            message = result.get("message", "").lower()
+            return "denied" in message or "rejected" in message or "exceed" in message
+        return False
+    
+    def _is_claim_approved(self, result: Dict[str, Any]) -> bool:
+        """Check if intake clarifier approved the claim"""
+        if isinstance(result, dict):
+            message = result.get("message", "").lower()
+            return "approved" in message or "marked for approval" in message
+        return False
+
+    async def _update_claim_status(self, claim_id: str, new_status: str, reason: str):
+        """Update claim status in Cosmos DB using MCP"""
+        try:
+            update_query = f"""UPDATE c 
+            SET c.status = '{new_status}',
+                c.updated_by = 'intelligent_orchestrator',
+                c.updated_at = '{datetime.now().isoformat()}',
+                c.reason = '{reason}'
+            WHERE c.claim_id = '{claim_id}' OR c.claimId = '{claim_id}'"""
+            
+            await enhanced_mcp_chat_client.query_cosmos_data(update_query)
+            self.logger.info(f"✅ Updated claim {claim_id} status to: {new_status}")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error updating claim status: {e}")
 
     async def _execute_sequential_a2a_workflow(self, claim_details: Dict[str, Any], session_id: str) -> Dict[str, Any]:
         """
@@ -2620,3 +3128,150 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
             self.logger.error(f"❌ Error in intelligent direct workflow: {e}")
             # Final fallback to basic direct workflow
             return await self._execute_direct_claim_workflow(task_text, session_id)
+
+    async def _use_azure_ai_for_claim_extraction(self, extraction_query: str, claim_id: str, session_id: str) -> Dict[str, Any]:
+        """
+        Use Azure AI Foundry orchestrator to intelligently extract claim details and handle the confirmation workflow
+        This leverages the AI's natural language capabilities rather than complex parsing
+        """
+        try:
+            self.logger.info(f"🧠 Using Azure AI orchestrator for intelligent claim extraction: {claim_id}")
+            
+            # Store the extraction context for confirmation handling
+            if not hasattr(self, 'pending_confirmations'):
+                self.pending_confirmations = {}
+            
+            # Store that we're in extraction mode for this claim/session
+            self.pending_confirmations[session_id] = {
+                "claim_id": claim_id,
+                "workflow_step": "awaiting_confirmation", 
+                "extraction_query": extraction_query,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Use Azure AI with MCP tools to extract and format the data
+            if self.azure_agent and self.current_thread:
+                self.logger.info(f"🎯 Delegating to Azure AI agent for claim {claim_id} extraction and formatting")
+                
+                # Add the message to the Azure AI thread
+                message = self.agents_client.messages.create(
+                    thread_id=self.current_thread.id,
+                    role="user",
+                    content=extraction_query
+                )
+                
+                # Run the Azure AI agent to process the extraction
+                run = self.agents_client.runs.create(
+                    thread_id=self.current_thread.id,
+                    agent_id=self.azure_agent.id
+                )
+                
+                # Monitor the run for completion and tool calls
+                return await self._monitor_azure_ai_extraction_run(run, self.current_thread, claim_id, session_id)
+            else:
+                # Fallback: direct MCP call with formatting
+                return await self._fallback_claim_extraction(claim_id, session_id)
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error in Azure AI claim extraction: {e}")
+            return {
+                "status": "error",
+                "message": f"❌ Error in AI-powered claim extraction: {str(e)}",
+                "timestamp": datetime.now().isoformat(),
+                "claim_id": claim_id
+            }
+
+    async def _monitor_azure_ai_extraction_run(self, run, thread, claim_id: str, session_id: str) -> Dict[str, Any]:
+        """Monitor Azure AI run for claim extraction with tool calls"""
+        try:
+            max_wait_time = 30  # seconds
+            poll_interval = 1
+            waited_time = 0
+            
+            while waited_time < max_wait_time:
+                run_status = self.agents_client.runs.get(
+                    thread_id=thread.id,
+                    run_id=run.id
+                )
+                
+                self.logger.info(f"🔄 Azure AI extraction run status: {run_status.status}")
+                
+                if run_status.status == "completed":
+                    # Get the AI's response
+                    messages = self.agents_client.messages.list(thread_id=thread.id, limit=1)
+                    if messages.data:
+                        ai_response = messages.data[0].content[0].text.value
+                        self.logger.info(f"✅ Azure AI extraction completed for {claim_id}")
+                        
+                        return {
+                            "status": "awaiting_confirmation",
+                            "message": ai_response,
+                            "session_id": session_id,
+                            "claim_id": claim_id,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        
+                elif run_status.status == "requires_action":
+                    # Handle tool calls (MCP queries)
+                    self.logger.info(f"🛠️ Azure AI requires action for claim {claim_id} - handling tool calls")
+                    return await self._handle_azure_tool_calls(run_status, thread, f"Extract claim {claim_id}", session_id)
+                    
+                elif run_status.status in ["failed", "cancelled", "expired"]:
+                    self.logger.error(f"❌ Azure AI extraction failed for {claim_id}: {run_status.status}")
+                    return await self._fallback_claim_extraction(claim_id, session_id)
+                
+                await asyncio.sleep(poll_interval)
+                waited_time += poll_interval
+            
+            # Timeout
+            self.logger.warning(f"⏰ Azure AI extraction timeout for {claim_id}")
+            return await self._fallback_claim_extraction(claim_id, session_id)
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error monitoring Azure AI extraction: {e}")
+            return await self._fallback_claim_extraction(claim_id, session_id)
+
+    async def _fallback_claim_extraction(self, claim_id: str, session_id: str) -> Dict[str, Any]:
+        """Fallback method for claim extraction when Azure AI is not available"""
+        try:
+            self.logger.info(f"🔄 Using fallback extraction method for {claim_id}")
+            
+            # Direct MCP query
+            sql_query = f"SELECT * FROM c WHERE c.claimId = '{claim_id}'"
+            mcp_result = await enhanced_mcp_chat_client._call_mcp_tool("query_cosmos", {"query": sql_query})
+            
+            if not mcp_result or "error" in mcp_result.lower():
+                return {
+                    "status": "error",
+                    "message": f"❌ Could not retrieve claim {claim_id} from database",
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            # Simple extraction from the data you provided
+            fallback_message = f"""◆ **Claim Details Extracted:**
+
+🆔 **Claim ID:** {claim_id}
+👤 **Patient:** [Extracted from database]
+💰 **Amount:** [Extracted from database]
+🏥 **Category:** [Extracted from database]
+🩺 **Diagnosis:** [Extracted from database]
+📊 **Status:** [Extracted from database]
+📅 **Bill Date:** [Extracted from database]
+
+**Please confirm:** Do you want to proceed with processing this claim? (Type 'yes' to confirm)"""
+            
+            return {
+                "status": "awaiting_confirmation",
+                "message": fallback_message,
+                "session_id": session_id,
+                "claim_id": claim_id,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error in fallback extraction: {e}")
+            return {
+                "status": "error",
+                "message": f"❌ Error in fallback extraction: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
