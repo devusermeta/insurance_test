@@ -1728,7 +1728,7 @@
             }
         }
 
-        // Enhanced progress tracking for claim processing - more encouraging messages
+        // Enhanced progress tracking for claim processing - simplified without hardcoded messages
         function showProcessingProgress(message) {
             const claimId = extractClaimId(message);
             
@@ -1736,36 +1736,10 @@
             
 ⏳ **Processing Time:** May take 3-8 minutes for complex claims
 📊 **Agents Working:** Coverage Rules, Document Intelligence, Intake Clarifier
-🔄 **Please wait** - No timeout, processing will complete when ready
+🔄 **Please wait** - No timeout, processing will complete when ready`);
 
-🔍 **Progress Updates:**`);
-
-            // Show progress updates every 30 seconds (more frequent)
-            const progressMessages = [
-                '📋 **Coverage Rules Engine:** Analyzing policy terms and coverage limits...',
-                '📄 **Document Intelligence:** Processing uploaded medical documents...',
-                '🩺 **Document Intelligence:** Extracting patient information and medical data...',
-                '🔍 **Intake Clarifier:** Reviewing claim details for completeness...',
-                '✅ **Intake Clarifier:** Performing final validation and approval checks...',
-                '📊 **Orchestrator:** Compiling results and generating final decision...',
-                '🎯 **Final Step:** Preparing claim decision report...',
-                '⏳ **Almost Done:** Finalizing approval/denial decision...',
-                '🔄 **Still Processing:** Complex claims require thorough analysis...',
-                '💪 **Patience Appreciated:** Quality processing takes time...'
-            ];
-            
-            let currentStep = 0;
-            const progressInterval = setInterval(() => {
-                if (currentStep < progressMessages.length) {
-                    addMessageToChat('assistant', progressMessages[currentStep]);
-                    currentStep++;
-                } else {
-                    // Loop back to encouraging messages
-                    currentStep = 7; // Start from "Almost Done" message
-                }
-            }, 30000); // Show progress every 30 seconds
-            
-            return progressInterval;
+            // No hardcoded progress messages - let the actual agent responses show progress
+            return null; // No interval to clear
         }
 
         // Extract claim ID from message

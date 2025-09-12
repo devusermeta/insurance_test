@@ -1672,6 +1672,15 @@ To process claim {claim_id} for {claim_details['patient_name']}:
         # Redirect to the complete A2A workflow that implements your exact vision
         return await self._execute_complete_a2a_workflow(claim_details, session_id)
 
+    async def _send_progress_update(self, message: str, session_id: str = None):
+        """Send a progress update message to the frontend"""
+        try:
+            # For now, just log the message as the A2A framework doesn't support mid-workflow updates
+            # The frontend will see the agent progression from the A2A framework
+            self.logger.info(f"� FRONTEND UPDATE: {message}")
+        except Exception as e:
+            self.logger.warning(f"⚠️ Could not send progress update: {e}")
+
     async def _execute_complete_a2a_workflow(self, claim_details: Dict[str, Any], session_id: str) -> Dict[str, Any]:
         """
         Execute YOUR COMPLETE WORKFLOW - LLM-based claim processing:
@@ -1738,31 +1747,37 @@ Document Requirements:
             )
             
             # Check if coverage denied the claim
+            self.logger.info(f"🔍 Checking if claim {claim_id} was denied by Coverage Rules Engine...")
+            self.logger.info(f"📝 Coverage result type: {type(coverage_result)}")
+            self.logger.info(f"📝 Coverage result content: {str(coverage_result)[:500]}...")
+            
             if self._is_claim_denied(coverage_result):
-                # Check the type of denial to determine if we should update status
-                denial_reason = coverage_result.get("message", "Coverage validation failed")
+                self.logger.info(f"🛑 WORKFLOW STOPPING - Claim {claim_id} was DENIED by Coverage Rules Engine")
+                # Extract the specific rejection reason from the coverage result
+                specific_reason = self._extract_rejection_reason(coverage_result)
                 
-                # If it's a pre-validation failure, don't update status (Coverage Rules Engine already handled it)
-                if "already approved" in denial_reason.lower() or "already processed" in denial_reason.lower():
-                    self.logger.info(f"⏹️ Pre-validation failure - no status update needed: {denial_reason}")
+                # Check the type of denial to determine if we should update status
+                if "already approved" in specific_reason.lower() or "already processed" in specific_reason.lower():
+                    self.logger.info(f"⏹️ Pre-validation failure - no status update needed: {specific_reason}")
                     return {
-                        "status": "denied_pre_validation",
-                        "message": f"❌ **CLAIM DENIED - PRE-VALIDATION**\n\nClaim {claim_id} processing stopped.\n\nReason: {denial_reason}",
+                        "status": "denied_pre_validation", 
+                        "message": f"❌ **CLAIM DENIED**\n\nClaim {claim_id} processing stopped.\n\nReason: {specific_reason}",
                         "claim_id": claim_id,
                         "timestamp": datetime.now().isoformat()
                     }
                 else:
                     # Traditional validation failure - Coverage Rules Engine already updated status
-                    self.logger.info(f"❌ Traditional validation failure - status already updated: {denial_reason}")
+                    self.logger.info(f"❌ Traditional validation failure - status already updated: {specific_reason}")
                     return {
                         "status": "denied",
-                        "message": f"❌ **CLAIM DENIED**\n\nClaim {claim_id} has been denied by Coverage Rules Engine.\n\nReason: {denial_reason}",
+                        "message": f"❌ **CLAIM DENIED**\n\nClaim {claim_id} has been denied by Coverage Rules Engine.\n\nReason: {specific_reason}",
                         "claim_id": claim_id,
                         "timestamp": datetime.now().isoformat()
                     }
             
             # STEP 3: Document Intelligence - Extract patient data
-            self.logger.info(f"📄 Calling Document Intelligence for {claim_id}")
+            self.logger.info(f"� WORKFLOW CONTINUING - Claim {claim_id} was APPROVED by Coverage Rules Engine, proceeding to Document Intelligence")
+            self.logger.info(f"�📄 Calling Document Intelligence for {claim_id}")
             
             # Extract document URLs from complete claim data using LLM
             doc_urls = []
@@ -2096,6 +2111,89 @@ Claim {claim_id} has been denied during intake verification.
             
         except Exception as e:
             self.logger.error(f"❌ Error updating claim status: {e}")
+
+    def _extract_rejection_reason(self, result: Dict[str, Any]) -> str:
+        """Extract the specific rejection reason from agent response"""
+        try:
+            # Default fallback reason
+            default_reason = "Coverage validation failed"
+            
+            if not isinstance(result, dict):
+                return default_reason
+            
+            # Method 1: Look for evaluation.rejection_reason in the result
+            if "evaluation" in result and isinstance(result["evaluation"], dict):
+                rejection_reason = result["evaluation"].get("rejection_reason")
+                if rejection_reason:
+                    self.logger.info(f"📝 Extracted reason from evaluation: {rejection_reason}")
+                    return rejection_reason
+            
+            # Method 2: Extract from A2A response text content
+            message_text = ""
+            if "result" in result and isinstance(result["result"], dict):
+                if "parts" in result["result"] and isinstance(result["result"]["parts"], list):
+                    if len(result["result"]["parts"]) > 0:
+                        if "text" in result["result"]["parts"][0]:
+                            message_text = result["result"]["parts"][0]["text"]
+            
+            # Fallback to direct message field
+            if not message_text:
+                message_text = result.get("message", "")
+            
+            if message_text:
+                # Method 3: Parse structured response for rejection reason
+                lines = message_text.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    # Look for rejection reason patterns
+                    if "❌ REJECTED:" in line:
+                        reason = line.replace("❌ REJECTED:", "").strip()
+                        if reason:
+                            self.logger.info(f"📝 Extracted reason from rejection line: {reason}")
+                            return reason
+                    elif "❌ PRE-VALIDATION FAILED:" in line:
+                        reason = line.replace("❌ PRE-VALIDATION FAILED:", "").strip()
+                        if reason:
+                            self.logger.info(f"📝 Extracted reason from pre-validation: {reason}")
+                            return reason
+                    elif "Reason:" in line:
+                        reason = line.split("Reason:", 1)[1].strip()
+                        if reason:
+                            self.logger.info(f"📝 Extracted reason from Reason line: {reason}")
+                            return reason
+                
+                # Method 4: Try to parse JSON from response
+                try:
+                    import json
+                    if "{" in message_text and "}" in message_text:
+                        json_start = message_text.find('{')
+                        json_end = message_text.rfind('}') + 1
+                        if json_start >= 0 and json_end > json_start:
+                            json_part = message_text[json_start:json_end]
+                            parsed = json.loads(json_part)
+                            if "rejection_reason" in parsed:
+                                reason = parsed["rejection_reason"]
+                                self.logger.info(f"📝 Extracted reason from JSON: {reason}")
+                                return reason
+                except:
+                    pass
+                
+                # Method 5: Look for specific pre-validation patterns
+                if "already approved" in message_text.lower():
+                    return "Claim denied - already approved"
+                elif "already processed" in message_text.lower():
+                    return "Claim denied - documents already processed"
+                elif "insufficient documents" in message_text.lower():
+                    return "Insufficient documents provided"
+                elif "bill amount exceed" in message_text.lower():
+                    return "Bill amount exceeds policy limits"
+            
+            self.logger.warning(f"⚠️ Could not extract specific rejection reason, using default")
+            return default_reason
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error extracting rejection reason: {e}")
+            return "Coverage validation failed"
 
     def _is_agent_failure(self, result: Dict[str, Any]) -> bool:
         """Check if an agent request failed or returned an error"""
@@ -3157,28 +3255,8 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                         processing_task.cancel()
                         return await self._execute_direct_claim_workflow(task_text, session_id)
                     
-                    progress_messages = [
-                        "🧠 Azure AI is analyzing your claim and selecting the best routing strategy...",
-                        "🔍 Coordinating with specialist agents for comprehensive analysis...", 
-                        "⚖️ Running advanced policy evaluation and compliance checks...",
-                        "🔬 Deep analysis in progress - ensuring thorough claim review...",
-                        "📊 Finalizing intelligent routing decisions and agent coordination..."
-                    ]
-                    
-                    message_index = min(update_count - 1, len(progress_messages) - 1)
-                    
-                    # Send progress update to keep UI alive
-                    progress_update = new_agent_text_message(
-                        text=f"{progress_messages[message_index]} (Elapsed: {int(elapsed)}s)",
-                        task_id=getattr(ctx, 'task_id', None)
-                    )
-                    
-                    try:
-                        await event_queue.enqueue_event(progress_update)
-                        self.logger.info(f"📤 Sent progress update #{update_count} to UI (elapsed: {int(elapsed)}s)")
-                    except Exception as queue_error:
-                        self.logger.warning(f"⚠️ Could not send progress update: {queue_error}")
-                        # Continue processing even if update fails
+                    # No progress messages - just log elapsed time
+                    self.logger.info(f"⏳ Azure AI processing... (Elapsed: {int(elapsed)}s)")
                         
                 except asyncio.CancelledError:
                     self.logger.warning("⚠️ Processing task was cancelled - falling back to direct workflow")
