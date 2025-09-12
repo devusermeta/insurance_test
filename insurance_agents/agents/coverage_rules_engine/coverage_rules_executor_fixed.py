@@ -480,6 +480,49 @@ class CoverageRulesExecutorFixed(AgentExecutor):
         rules_applied = []
         rejection_reason = None
         
+        # PRE-VALIDATION CHECKS - New Enhanced Logic
+        self.logger.info(f"🔍 Starting pre-validation checks for claim {claim_id}")
+        
+        # STEP 0.1: Check if claim is already approved
+        claim_status_check = await self._check_claim_status(claim_id)
+        if not claim_status_check["can_process"]:
+            self.logger.info(f"⏹️ Pre-validation failed: {claim_status_check['reason']}")
+            return {
+                "eligible": False,
+                "claim_type": "pre_validation_failed",
+                "max_allowed": 0,
+                "bill_amount": bill_amount,
+                "amount_within_limit": False,
+                "required_documents": [],
+                "rules_applied": [f"❌ PRE-VALIDATION FAILED: {claim_status_check['reason']}"],
+                "rejection_reason": claim_status_check['reason'],
+                "workflow_action": "stop_processing",
+                "next_agent": "none",
+                "status": "denied_pre_validation"
+            }
+        
+        # STEP 0.2: Check if documents are already processed
+        doc_processing_check = await self._check_document_processing_status(claim_id)
+        if not doc_processing_check["can_process"]:
+            self.logger.info(f"⏹️ Pre-validation failed: {doc_processing_check['reason']}")
+            return {
+                "eligible": False,
+                "claim_type": "pre_validation_failed",
+                "max_allowed": 0,
+                "bill_amount": bill_amount,
+                "amount_within_limit": False,
+                "required_documents": [],
+                "rules_applied": [f"❌ PRE-VALIDATION FAILED: {doc_processing_check['reason']}"],
+                "rejection_reason": doc_processing_check['reason'],
+                "workflow_action": "stop_processing",
+                "next_agent": "none",
+                "status": "denied_pre_validation"
+            }
+        
+        # Pre-validation passed - continue with normal rules
+        rules_applied.append("✅ Pre-validation checks passed")
+        self.logger.info(f"✅ Pre-validation checks passed for claim {claim_id}")
+        
         # STEP 0: Check if orchestrator provided complete document data already
         # The orchestrator now passes complete document data including attachments
         # No special handling needed - LLM extraction should capture attachments
@@ -509,7 +552,8 @@ class CoverageRulesExecutorFixed(AgentExecutor):
         if not document_check["valid"]:
             rejection_reason = document_check["reason"]
             rules_applied.append(f"❌ REJECTED: {rejection_reason}")
-            return self._create_rejection_result(bill_amount, rules_applied, rejection_reason)
+            result = await self._create_rejection_result(claim_id, bill_amount, rules_applied, rejection_reason)
+            return result
         
         rules_applied.extend(document_check["rules_applied"])
         
@@ -523,7 +567,8 @@ class CoverageRulesExecutorFixed(AgentExecutor):
         else:
             rejection_reason = f"Invalid claim category: {category}. Must be 'inpatient' or 'outpatient'"
             rules_applied.append(f"❌ {rejection_reason}")
-            return self._create_rejection_result(bill_amount, rules_applied, rejection_reason)
+            result = await self._create_rejection_result(claim_id, bill_amount, rules_applied, rejection_reason)
+            return result
         
         # STEP 3: Classify claim type based on diagnosis (YOUR SPECIFIC RULES)
         claim_type = self._classify_claim_type(diagnosis)
@@ -537,7 +582,8 @@ class CoverageRulesExecutorFixed(AgentExecutor):
         if bill_amount > max_amount:
             rejection_reason = f"Bill amount ${bill_amount} exceeds {claim_type} limit of ${max_amount}"
             rules_applied.append(f"❌ REJECTED: {rejection_reason}")
-            return self._create_rejection_result(bill_amount, rules_applied, rejection_reason)
+            result = await self._create_rejection_result(claim_id, bill_amount, rules_applied, rejection_reason)
+            return result
         
         # STEP 5: All validations passed - APPROVE for workflow continuation
         rules_applied.append(f"✅ Amount validation passed: ${bill_amount} ≤ ${max_amount}")
@@ -590,50 +636,6 @@ class CoverageRulesExecutorFixed(AgentExecutor):
         except Exception as e:
             self.logger.error(f"❌ Error fetching complete claim data from Cosmos DB: {e}")
             return {}
-        
-        # STEP 2: Validate claim category
-        if 'outpatient' in category:
-            required_docs = self.rule_sets["document_requirements"]["outpatient"]["required_documents"]
-            rules_applied.append(f"✅ Outpatient claim - requires: {', '.join(required_docs)}")
-        elif 'inpatient' in category:
-            required_docs = self.rule_sets["document_requirements"]["inpatient"]["required_documents"]
-            rules_applied.append(f"✅ Inpatient claim - requires: {', '.join(required_docs)}")
-        else:
-            rejection_reason = f"Invalid claim category: {category}. Must be 'inpatient' or 'outpatient'"
-            rules_applied.append(f"❌ {rejection_reason}")
-            return self._create_rejection_result(bill_amount, rules_applied, rejection_reason)
-        
-        # STEP 2: Classify claim type based on diagnosis (YOUR SPECIFIC RULES)
-        claim_type = self._classify_claim_type(diagnosis)
-        claim_limits = self.rule_sets["claim_type_limits"][claim_type]
-        max_amount = claim_limits["max_amount"]
-        
-        rules_applied.append(f"🏷️ Claim classified as: {claim_type.upper()}")
-        rules_applied.append(f"💰 Maximum allowed amount: ${max_amount}")
-        
-        # STEP 3: Validate bill amount against YOUR SPECIFIC LIMITS
-        if bill_amount > max_amount:
-            rejection_reason = f"Bill amount ${bill_amount} exceeds {claim_type} limit of ${max_amount}"
-            rules_applied.append(f"❌ REJECTED: {rejection_reason}")
-            return self._create_rejection_result(bill_amount, rules_applied, rejection_reason)
-        
-        # STEP 4: All validations passed - APPROVE for workflow continuation
-        rules_applied.append(f"✅ Amount validation passed: ${bill_amount} ≤ ${max_amount}")
-        rules_applied.append(f"🔄 APPROVED for next workflow step: Document Intelligence")
-        
-        return {
-            "eligible": True,
-            "claim_type": claim_type,
-            "max_allowed": max_amount,
-            "bill_amount": bill_amount,
-            "amount_within_limit": True,
-            "required_documents": required_docs,
-            "rules_applied": rules_applied,
-            "rejection_reason": None,
-            "workflow_action": "continue_to_document_intelligence",
-            "next_agent": "document_intelligence",
-            "status": "approved_for_processing"
-        }
     
     def _classify_claim_type(self, diagnosis: str) -> str:
         """Classify claim type based on diagnosis using LLM for intelligent classification"""
@@ -772,8 +774,12 @@ Return ONLY the category name (eye, dental, or general) with no additional text.
             "rules_applied": rules_applied
         }
     
-    def _create_rejection_result(self, bill_amount: float, rules_applied: List[str], rejection_reason: str) -> Dict[str, Any]:
-        """Create a standardized rejection result"""
+    async def _create_rejection_result(self, claim_id: str, bill_amount: float, rules_applied: List[str], rejection_reason: str) -> Dict[str, Any]:
+        """Create a standardized rejection result and update status in database"""
+        
+        # Update status in database for traditional validation failures
+        await self._update_claim_status(claim_id, "marked for rejection", rejection_reason)
+        
         return {
             "eligible": False,
             "claim_type": "unknown",
@@ -787,6 +793,141 @@ Return ONLY the category name (eye, dental, or general) with no additional text.
             "next_agent": None,
             "status": "rejected"
         }
+
+    async def _check_claim_status(self, claim_id: str) -> Dict[str, Any]:
+        """
+        Check if claim is already approved in claim_details container
+        Returns: {"can_process": bool, "reason": str}
+        """
+        try:
+            if not self.cosmos_client:
+                self.logger.warning("⚠️ Cosmos DB client not available, skipping status check")
+                return {"can_process": True, "reason": "Cosmos client unavailable"}
+            
+            # Get database and container
+            async with self.cosmos_client as client:
+                database = client.get_database_client(self.database_name)
+                container = database.get_container_client("claim_details")
+                
+                # Query for the specific claim status
+                query = "SELECT c.status FROM c WHERE c.claimId = @claim_id"
+                parameters = [{"name": "@claim_id", "value": claim_id}]
+                
+                items = []
+                async for item in container.query_items(query=query, parameters=parameters):
+                    items.append(item)
+                
+                if items:
+                    current_status = items[0].get('status', '').lower()
+                    self.logger.info(f"🔍 Found claim {claim_id} with status: {current_status}")
+                    
+                    if current_status == "marked for approval":
+                        return {
+                            "can_process": False,
+                            "reason": "Claim denied - already approved"
+                        }
+                    
+                    return {"can_process": True, "reason": f"Status check passed: {current_status}"}
+                else:
+                    self.logger.warning(f"⚠️ No claim found with ID {claim_id}")
+                    return {"can_process": True, "reason": "Claim not found, allowing processing"}
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error checking claim status: {e}")
+            # Default to allowing processing if check fails
+            return {"can_process": True, "reason": f"Status check failed: {str(e)}"}
+
+    async def _check_document_processing_status(self, claim_id: str) -> Dict[str, Any]:
+        """
+        Check if documents are already processed in extracted_patient_data container
+        Returns: {"can_process": bool, "reason": str}
+        """
+        try:
+            if not self.cosmos_client:
+                self.logger.warning("⚠️ Cosmos DB client not available, skipping document processing check")
+                return {"can_process": True, "reason": "Cosmos client unavailable"}
+            
+            # Get database and container
+            async with self.cosmos_client as client:
+                database = client.get_database_client(self.database_name)
+                container = database.get_container_client("extracted_patient_data")
+                
+                # Query for existing extracted data with this claim_id
+                query = "SELECT c.id FROM c WHERE c.id = @claim_id"
+                parameters = [{"name": "@claim_id", "value": claim_id}]
+                
+                items = []
+                async for item in container.query_items(query=query, parameters=parameters):
+                    items.append(item)
+                
+                if items:
+                    self.logger.info(f"🔍 Found existing extracted data for claim {claim_id}")
+                    return {
+                        "can_process": False,
+                        "reason": "Claim denied - documents already processed"
+                    }
+                else:
+                    self.logger.info(f"✅ No existing extracted data found for claim {claim_id}")
+                    return {"can_process": True, "reason": "Document processing check passed"}
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error checking document processing status: {e}")
+            # Default to allowing processing if check fails
+            return {"can_process": True, "reason": f"Document processing check failed: {str(e)}"}
+
+    async def _update_claim_status(self, claim_id: str, new_status: str, reason: str = None) -> bool:
+        """
+        Update claim status in claim_details container
+        Returns: True if successful, False otherwise
+        """
+        try:
+            if not self.cosmos_client:
+                self.logger.warning("⚠️ Cosmos DB client not available, cannot update status")
+                return False
+            
+            # Get database and container
+            async with self.cosmos_client as client:
+                database = client.get_database_client(self.database_name)
+                container = database.get_container_client("claim_details")
+                
+                # First, get the existing document
+                query = "SELECT * FROM c WHERE c.claimId = @claim_id"
+                parameters = [{"name": "@claim_id", "value": claim_id}]
+                
+                items = []
+                async for item in container.query_items(query=query, parameters=parameters):
+                    items.append(item)
+                
+                if not items:
+                    self.logger.error(f"❌ Cannot update status: claim {claim_id} not found")
+                    return False
+                
+                # Update the document
+                claim_doc = items[0]
+                claim_doc['status'] = new_status
+                claim_doc['lastUpdatedAt'] = datetime.now().isoformat()
+                
+                if reason:
+                    if 'processing_notes' not in claim_doc:
+                        claim_doc['processing_notes'] = []
+                    claim_doc['processing_notes'].append({
+                        'timestamp': datetime.now().isoformat(),
+                        'note': reason,
+                        'updated_by': 'coverage_rules_engine'
+                    })
+                
+                # Replace the document
+                await container.replace_item(
+                    item=claim_doc,
+                    body=claim_doc
+                )
+                
+                self.logger.info(f"✅ Updated claim {claim_id} status to: {new_status}")
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error updating claim status: {e}")
+            return False
 
 # Create the fixed executor instance
 CoverageRulesExecutor = CoverageRulesExecutorFixed

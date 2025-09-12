@@ -1739,15 +1739,27 @@ Document Requirements:
             
             # Check if coverage denied the claim
             if self._is_claim_denied(coverage_result):
-                # Update status to marked for rejection using MCP
-                await self._update_claim_status(claim_id, "marked for rejection", coverage_result.get("message", "Coverage rules denied"))
+                # Check the type of denial to determine if we should update status
+                denial_reason = coverage_result.get("message", "Coverage validation failed")
                 
-                return {
-                    "status": "denied",
-                    "message": f"❌ **CLAIM DENIED**\n\nClaim {claim_id} has been denied by Coverage Rules Engine.\n\nReason: {coverage_result.get('message', 'Coverage validation failed')}",
-                    "claim_id": claim_id,
-                    "timestamp": datetime.now().isoformat()
-                }
+                # If it's a pre-validation failure, don't update status (Coverage Rules Engine already handled it)
+                if "already approved" in denial_reason.lower() or "already processed" in denial_reason.lower():
+                    self.logger.info(f"⏹️ Pre-validation failure - no status update needed: {denial_reason}")
+                    return {
+                        "status": "denied_pre_validation",
+                        "message": f"❌ **CLAIM DENIED - PRE-VALIDATION**\n\nClaim {claim_id} processing stopped.\n\nReason: {denial_reason}",
+                        "claim_id": claim_id,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                else:
+                    # Traditional validation failure - Coverage Rules Engine already updated status
+                    self.logger.info(f"❌ Traditional validation failure - status already updated: {denial_reason}")
+                    return {
+                        "status": "denied",
+                        "message": f"❌ **CLAIM DENIED**\n\nClaim {claim_id} has been denied by Coverage Rules Engine.\n\nReason: {denial_reason}",
+                        "claim_id": claim_id,
+                        "timestamp": datetime.now().isoformat()
+                    }
             
             # STEP 3: Document Intelligence - Extract patient data
             self.logger.info(f"📄 Calling Document Intelligence for {claim_id}")
@@ -1849,6 +1861,23 @@ Extract from documents and create document in extracted_patient_data container:
                 parameters={"claim_id": claim_id, "category": claim_details['category']}
             )
             
+            # Check if document intelligence failed
+            if self._is_agent_failure(doc_result):
+                failure_reason = doc_result.get("message", "Document intelligence processing failed")
+                self.logger.error(f"❌ Document Intelligence failed: {failure_reason}")
+                
+                # Update status to marked for rejection (orchestrator responsibility)
+                await self._update_claim_status(claim_id, "marked for rejection", f"Document processing failed: {failure_reason}")
+                
+                return {
+                    "status": "denied",
+                    "message": f"❌ **CLAIM DENIED - DOCUMENT PROCESSING FAILED**\n\nClaim {claim_id} could not be processed.\n\nReason: {failure_reason}",
+                    "claim_id": claim_id,
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            self.logger.info(f"✅ Document Intelligence completed successfully for {claim_id}")
+            
             # STEP 4: Intake Clarifier - Compare data and update status
             self.logger.info(f"📋 Calling Intake Clarifier for {claim_id}")
             
@@ -1868,6 +1897,23 @@ If match: Update status to 'marked for approval'"""
                 task=intake_task, 
                 parameters={"claim_id": claim_id}
             )
+            
+            # Check if intake clarifier failed
+            if self._is_agent_failure(intake_result):
+                failure_reason = intake_result.get("message", "Intake clarifier processing failed")
+                self.logger.error(f"❌ Intake Clarifier failed: {failure_reason}")
+                
+                # Update status to marked for rejection (orchestrator responsibility)
+                await self._update_claim_status(claim_id, "marked for rejection", f"Intake verification failed: {failure_reason}")
+                
+                return {
+                    "status": "denied",
+                    "message": f"❌ **CLAIM DENIED - INTAKE VERIFICATION FAILED**\n\nClaim {claim_id} could not be verified.\n\nReason: {failure_reason}",
+                    "claim_id": claim_id,
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            self.logger.info(f"✅ Intake Clarifier completed successfully for {claim_id}")
             
             # Determine final result
             if self._is_claim_approved(intake_result):
@@ -2050,6 +2096,27 @@ Claim {claim_id} has been denied during intake verification.
             
         except Exception as e:
             self.logger.error(f"❌ Error updating claim status: {e}")
+
+    def _is_agent_failure(self, result: Dict[str, Any]) -> bool:
+        """Check if an agent request failed or returned an error"""
+        if not result:
+            return True
+            
+        # Check for error status
+        status = result.get("status", "").lower()
+        if status in ["error", "failed", "failure"]:
+            return True
+            
+        # Check for error messages
+        message = result.get("message", "").lower()
+        if any(error_term in message for error_term in ["error", "failed", "failure", "could not", "unable to"]):
+            return True
+            
+        # Check for A2A error structure
+        if "error" in str(result).lower():
+            return True
+            
+        return False
 
     async def _execute_sequential_a2a_workflow(self, claim_details: Dict[str, Any], session_id: str) -> Dict[str, Any]:
         """

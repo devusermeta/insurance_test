@@ -251,16 +251,36 @@ class DocumentIntelligenceExecutor(AgentExecutor):
                 await self._write_extracted_data_to_cosmos(claim_id, claim_info, extracted_data)
                 self.logger.info(f"✅ Successfully wrote extracted data to Cosmos DB")
                 
-                response = f"""📄 **Document Intelligence Processing Complete**
+                # NEW REQUIREMENT: Call intake clarifier after successful document processing
+                self.logger.info(f"📋 Calling intake clarifier for verification...")
+                intake_result = await self._call_intake_clarifier(claim_id)
+                
+                if intake_result.get("status") == "success":
+                    response = f"""📄 **Document Intelligence Processing Complete**
 
 **Claim ID**: {claim_id}
 **Category**: {claim_info.get('category', 'Unknown')}
 **Documents Processed**: {len(document_urls)}
 **Status**: Successfully processed and stored in extracted_patient_data
 
-**Next Step**: Data ready for intake clarifier verification"""
-                
-                return {"status": "success", "response": response}
+**Verification Result**: {intake_result.get('message', 'Intake verification completed')}
+
+**Next Step**: Workflow complete - status updated in Cosmos DB"""
+                    
+                    return {"status": "success", "response": response}
+                else:
+                    # Intake clarifier failed, but document processing succeeded
+                    response = f"""📄 **Document Intelligence Processing Complete with Verification Issue**
+
+**Claim ID**: {claim_id}
+**Category**: {claim_info.get('category', 'Unknown')}
+**Documents Processed**: {len(document_urls)}
+**Document Status**: Successfully processed and stored in extracted_patient_data
+**Verification Status**: Failed - {intake_result.get('message', 'Intake verification failed')}
+
+**Next Step**: Manual review required"""
+                    
+                    return {"status": "warning", "response": response}
                 
             except Exception as doc_error:
                 self.logger.error(f"❌ Document processing failed for {claim_id}: {str(doc_error)}")
@@ -841,6 +861,69 @@ KEY-VALUE PAIRS FOUND:
 
 Return any found information as JSON with appropriate field names.
 """
+
+    async def _call_intake_clarifier(self, claim_id: str) -> Dict[str, Any]:
+        """
+        Call intake clarifier to verify extracted data against original claim data
+        Returns: {"status": "success"|"error", "message": "description"}
+        """
+        try:
+            self.logger.info(f"📋 Calling intake clarifier for claim {claim_id}")
+            
+            # Prepare task for intake clarifier
+            intake_task = f"""Compare claim data with extracted patient data:
+Claim ID: {claim_id}
+
+Fetch documents from:
+- claim_details container (claim_id: {claim_id})  
+- extracted_patient_data container (claim_id: {claim_id})
+
+Compare: patient_name, bill_amount, bill_date, diagnosis vs medical_condition
+If mismatch: Update status to 'marked for rejection' with reason
+If match: Update status to 'marked for approval'"""
+            
+            # Call intake clarifier via A2A
+            intake_result = await self.a2a_client.send_request(
+                target_agent="intake_clarifier",
+                task=intake_task,
+                parameters={"claim_id": claim_id}
+            )
+            
+            # Process the result
+            if intake_result:
+                # Check if it's a successful approval
+                result_str = str(intake_result).lower()
+                if "approved" in result_str or "marked for approval" in result_str:
+                    self.logger.info(f"✅ Intake clarifier approved claim {claim_id}")
+                    return {
+                        "status": "success",
+                        "message": "Claim approved and status updated"
+                    }
+                elif "rejected" in result_str or "marked for rejection" in result_str:
+                    self.logger.info(f"❌ Intake clarifier rejected claim {claim_id}")
+                    return {
+                        "status": "error", 
+                        "message": "Claim rejected due to data mismatch"
+                    }
+                else:
+                    self.logger.warning(f"⚠️ Unclear result from intake clarifier for {claim_id}")
+                    return {
+                        "status": "error",
+                        "message": f"Unclear verification result: {intake_result}"
+                    }
+            else:
+                self.logger.error(f"❌ No response from intake clarifier for {claim_id}")
+                return {
+                    "status": "error",
+                    "message": "No response from intake clarifier"
+                }
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error calling intake clarifier for {claim_id}: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to call intake clarifier: {str(e)}"
+            }
 
 print("📄 Document Intelligence Executor loaded successfully!")
 print("✅ Updated implementation with direct Cosmos DB access and orchestrator-provided URLs")

@@ -104,6 +104,9 @@ class IntakeClarifierExecutor(AgentExecutor):
             # Step 3: Perform LLM-based data comparison according to your vision
             comparison_result = await self._llm_compare_claim_vs_extracted_data(claim_details, extracted_data)
             
+            # Step 4: Update claim status in Cosmos DB based on verification result
+            await self._update_claim_status(claim_id, comparison_result)
+            
             self.logger.info(f"✅ Verification completed for {claim_id}: {'PASSED' if comparison_result['verified'] else 'FAILED'}")
             
             return comparison_result
