@@ -23,6 +23,7 @@ from shared.agent_discovery import AgentDiscoveryService
 from shared.a2a_client import A2AClient
 from shared.mcp_chat_client import enhanced_mcp_chat_client  # Updated import
 from shared.workflow_logger import workflow_logger, WorkflowStepType, WorkflowStepStatus
+from shared.dynamic_workflow_logger import workflow_logger as dynamic_workflow_logger, WorkflowStepType as DynamicStepType, WorkflowStepStatus as DynamicStepStatus
 
 # Azure AI Foundry imports
 from azure.ai.projects import AIProjectClient
@@ -1285,8 +1286,26 @@ Task: {task_type} for claim {claim_id}"""
         try:
             self.logger.info(f"🚀 Starting NEW WORKFLOW for claim: {claim_id}")
             
+            # Initialize dynamic workflow tracking
+            workflow_id = dynamic_workflow_logger.start_workflow(session_id, claim_id)
+            
             # STEP 1: Extract claim details using MCP tools with AI-powered mapping
             self.logger.info(f"📊 STEP 1: Extracting claim details via MCP for {claim_id}")
+            
+            # Add workflow step: Claim Extraction
+            extraction_step_id = dynamic_workflow_logger.add_step(
+                session_id=session_id,
+                step_type=DynamicStepType.CLAIM_EXTRACTION,
+                title="📊 Extracting Claim Details",
+                description=f"Retrieving comprehensive claim data for {claim_id} from database",
+                status=DynamicStepStatus.IN_PROGRESS,
+                details={"claim_id": claim_id, "method": "Azure AI + MCP Tools"}
+            )
+            
+            # Store the extraction step ID for later reference
+            if not hasattr(self, 'workflow_step_ids'):
+                self.workflow_step_ids = {}
+            self.workflow_step_ids[session_id] = {"extraction_step_id": extraction_step_id}
             
             # Use Azure AI orchestrator to intelligently extract and format claim details
             if not enhanced_mcp_chat_client.session_id:
@@ -1619,6 +1638,16 @@ Task: {task_type} for claim {claim_id}"""
             if user_response in ["yes", "y", "confirm", "proceed"]:
                 self.logger.info(f"✅ Employee confirmed processing for {claim_id}")
                 
+                # Update workflow step: User confirmed
+                dynamic_workflow_logger.add_step(
+                    session_id=session_id,
+                    step_type=DynamicStepType.USER_CONFIRMATION,
+                    title="✅ User Confirmation Received",
+                    description="Employee confirmed to proceed with claim processing",
+                    status=DynamicStepStatus.COMPLETED,
+                    details={"claim_id": claim_id, "user_response": user_response}
+                )
+                
                 # Remove from pending confirmations
                 del self.pending_confirmations[session_id]
                 
@@ -1627,6 +1656,17 @@ Task: {task_type} for claim {claim_id}"""
                 
             elif user_response in ["no", "n", "cancel", "stop"]:
                 self.logger.info(f"❌ Employee cancelled processing for {claim_id}")
+                
+                # Update workflow step: User cancelled
+                dynamic_workflow_logger.add_step(
+                    session_id=session_id,
+                    step_type=DynamicStepType.USER_CONFIRMATION,
+                    title="❌ User Cancelled Processing",
+                    description="Employee cancelled claim processing",
+                    status=DynamicStepStatus.COMPLETED,
+                    details={"claim_id": claim_id, "user_response": user_response}
+                )
+                
                 del self.pending_confirmations[session_id]
                 
                 return {
@@ -1721,6 +1761,16 @@ To process claim {claim_id} for {claim_details['patient_name']}:
             # STEP 2: Coverage Rules Engine - Document validation and amount limits
             self.logger.info(f"🔍 Calling Coverage Rules Engine for {claim_id}")
             
+            # Add workflow step: Coverage Evaluation
+            coverage_step_id = dynamic_workflow_logger.add_step(
+                session_id=session_id,
+                step_type=DynamicStepType.COVERAGE_EVALUATION,
+                title="⚖️ Coverage Rules Evaluation",
+                description=f"Analyzing claim {claim_id} against business rules and coverage limits",
+                status=DynamicStepStatus.IN_PROGRESS,
+                details={"claim_id": claim_id, "agent": "coverage_rules_engine"}
+            )
+            
             coverage_task = f"""Analyze this claim for coverage determination using LLM classification:
 
 Claim ID: {claim_id}
@@ -1755,6 +1805,24 @@ Document Requirements:
                 self.logger.info(f"🛑 WORKFLOW STOPPING - Claim {claim_id} was DENIED by Coverage Rules Engine")
                 # Extract the specific rejection reason from the coverage result
                 specific_reason = self._extract_rejection_reason(coverage_result)
+                
+                # Update workflow step: Coverage evaluation failed
+                dynamic_workflow_logger.update_step_status(
+                    session_id=session_id,
+                    step_id=coverage_step_id,
+                    status=DynamicStepStatus.FAILED,
+                    description=f"Claim denied by coverage rules: {specific_reason}"
+                )
+                
+                # Add final workflow step: Denial decision
+                dynamic_workflow_logger.add_step(
+                    session_id=session_id,
+                    step_type=DynamicStepType.FINAL_DECISION,
+                    title="❌ Claim Denied",
+                    description=f"Claim processing stopped due to coverage rules failure",
+                    status=DynamicStepStatus.COMPLETED,
+                    details={"claim_id": claim_id, "reason": specific_reason, "decision": "denied"}
+                )
                 
                 # Check the type of denial to determine if we should update status
                 if "already approved" in specific_reason.lower() or "already processed" in specific_reason.lower():
@@ -3595,6 +3663,27 @@ Just ask me anything about insurance operations, and I'll figure out the best wa
                     if messages.data:
                         ai_response = messages.data[0].content[0].text.value
                         self.logger.info(f"✅ Azure AI extraction completed for {claim_id}")
+                        
+                        # Update workflow step: Extraction completed, waiting for user confirmation
+                        if hasattr(self, 'workflow_step_ids') and session_id in self.workflow_step_ids:
+                            extraction_step_id = self.workflow_step_ids[session_id].get("extraction_step_id")
+                            if extraction_step_id:
+                                dynamic_workflow_logger.update_step_status(
+                                    session_id=session_id,
+                                    step_id=extraction_step_id,
+                                    status=DynamicStepStatus.COMPLETED,
+                                    description=f"Successfully extracted claim details for {claim_id}"
+                                )
+                        
+                        # Add workflow step: User Confirmation
+                        dynamic_workflow_logger.add_step(
+                            session_id=session_id,
+                            step_type=DynamicStepType.USER_CONFIRMATION,
+                            title="⏳ Awaiting User Confirmation",
+                            description="Waiting for user to confirm claim processing",
+                            status=DynamicStepStatus.PENDING,
+                            details={"claim_id": claim_id, "action": "user_confirmation_required"}
+                        )
                         
                         return {
                             "status": "awaiting_confirmation",

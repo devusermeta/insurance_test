@@ -780,6 +780,106 @@
             color: #d32f2f;
         }
 
+        /* Pagination Styles */
+        .pagination-container {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 1rem;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .pagination-info {
+            color: #718096;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .pagination-controls {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .pagination-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            min-width: 100px;
+            justify-content: center;
+        }
+
+        .pagination-btn:hover:not(:disabled) {
+            background: linear-gradient(135deg, #5a67d8, #6b46c1);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .pagination-btn:disabled {
+            background: linear-gradient(135deg, #cbd5e0, #a0aec0);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .page-numbers {
+            display: flex;
+            gap: 0.25rem;
+        }
+
+        .page-number {
+            background: rgba(255, 255, 255, 0.8);
+            color: #4a5568;
+            border: 1px solid #e2e8f0;
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            min-width: 40px;
+            text-align: center;
+        }
+
+        .page-number:hover {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border-color: transparent;
+        }
+
+        .page-number.active {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border-color: transparent;
+            font-weight: 600;
+        }
+
+        .page-number.ellipsis {
+            background: transparent;
+            border: none;
+            cursor: default;
+            color: #a0aec0;
+        }
+
+        .page-number.ellipsis:hover {
+            background: transparent;
+            color: #a0aec0;
+        }
+
         /* Responsive Design */
         @media (max-width: 1200px) {
             .main-content {
@@ -803,6 +903,34 @@
             
             .claim-actions {
                 flex-direction: column;
+            }
+            
+            /* Pagination responsive */
+            .pagination-container {
+                flex-direction: column;
+                gap: 1rem;
+                text-align: center;
+            }
+            
+            .pagination-controls {
+                justify-content: center;
+                flex-wrap: wrap;
+            }
+            
+            .pagination-btn {
+                min-width: 80px;
+                font-size: 0.8rem;
+                padding: 0.4rem 0.8rem;
+            }
+            
+            .page-numbers {
+                order: -1;
+            }
+            
+            .page-number {
+                padding: 0.4rem 0.6rem;
+                font-size: 0.8rem;
+                min-width: 32px;
             }
         }
 
@@ -955,6 +1083,26 @@
             <div class="claims-grid" id="claimsContainer">
                 <!-- Claims will be loaded here -->
             </div>
+            
+            <!-- Pagination Controls -->
+            <div class="pagination-container" id="paginationContainer" style="display: none;">
+                <div class="pagination-info">
+                    <span id="paginationInfo">Showing 1-5 of 0 claims</span>
+                </div>
+                <div class="pagination-controls">
+                    <button id="prevBtn" class="pagination-btn" onclick="goToPreviousPage()" disabled>
+                        <i class="fas fa-chevron-left"></i>
+                        Previous
+                    </button>
+                    <div class="page-numbers" id="pageNumbers">
+                        <!-- Page numbers will be generated here -->
+                    </div>
+                    <button id="nextBtn" class="pagination-btn" onclick="goToNextPage()">
+                        Next
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
         </section>
 
         <!-- Processing Steps Section -->
@@ -981,6 +1129,12 @@
     <script>
         // Global state for toggle functionality
         let isShowingRecentHistory = false;
+        
+        // Pagination state
+        let allClaims = []; // Store all claims
+        let currentPage = 1;
+        const claimsPerPage = 5;
+        let totalPages = 1;
         
         // Toggle between Processing Steps and Recent History
         function toggleView() {
@@ -1068,22 +1222,124 @@
         }
 
         // Load recent history for the toggle view (last 2 workflows)
-        function loadRecentHistory() {
-            fetch('/api/recent-workflow-steps')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success' && data.steps && data.steps.length > 0) {
-                        displayRecentHistoryInProcessingContainer(data.steps);
+        async function loadRecentHistory() {
+            try {
+                // Use the local proxy route instead of direct connection to port 8001
+                const response = await fetch('/workflow-steps');
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const workflows = data.workflows || {};
+                    
+                    // Get all sessions sorted by most recent activity, limit to 2
+                    const sessions = Object.keys(workflows);
+                    if (sessions.length > 0) {
+                        const sortedSessions = sessions
+                            .sort((a, b) => {
+                                const aSteps = workflows[a] || [];
+                                const bSteps = workflows[b] || [];
+                                const aLatest = aSteps.length > 0 ? aSteps[aSteps.length - 1].timestamp : '';
+                                const bLatest = bSteps.length > 0 ? bSteps[bSteps.length - 1].timestamp : '';
+                                return bLatest.localeCompare(aLatest);
+                            })
+                            .slice(0, 2); // Get last 2 claims
+                        
+                        displayRecentHistoryFromDynamicWorkflows(workflows, sortedSessions);
                     } else {
                         document.getElementById('activityLog').innerHTML = 
                             '<p style="text-align: center; color: #666; padding: 1rem;">No recent history available.</p>';
                     }
-                })
-                .catch(error => {
-                    console.error('Error loading recent history:', error);
-                    document.getElementById('activityLog').innerHTML = 
-                        '<p style="text-align: center; color: #666; padding: 1rem;">Failed to load recent history.</p>';
+                } else {
+                    // Fallback to old API
+                    const fallbackResponse = await fetch('/api/recent-workflow-steps');
+                    const fallbackData = await fallbackResponse.json();
+                    
+                    if (fallbackData.status === 'success' && fallbackData.steps && fallbackData.steps.length > 0) {
+                        displayRecentHistoryInProcessingContainer(fallbackData.steps);
+                    } else {
+                        document.getElementById('activityLog').innerHTML = 
+                            '<p style="text-align: center; color: #666; padding: 1rem;">No recent history available.</p>';
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading recent history:', error);
+                document.getElementById('activityLog').innerHTML = 
+                    '<p style="text-align: center; color: #666; padding: 1rem;">Failed to load recent history.</p>';
+            }
+        }
+
+        // Display recent history from dynamic workflows (last 2 claims)
+        function displayRecentHistoryFromDynamicWorkflows(workflows, sessions) {
+            const container = document.getElementById('activityLog');
+            
+            if (sessions.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666; padding: 1rem;">No recent workflow history found.</p>';
+                return;
+            }
+
+            let html = '<div style="margin-bottom: 1rem;"><h4 style="color: #495057; margin-bottom: 1rem;">📋 Recent Claims History</h4></div>';
+
+            sessions.forEach((sessionId, index) => {
+                const steps = workflows[sessionId] || [];
+                if (steps.length === 0) return;
+
+                const claimId = steps[0]?.claim_id || 'Unknown';
+                const latestStep = steps[steps.length - 1];
+                const finalStatus = latestStep?.step_type === 'final_decision' ? 
+                    (latestStep.details?.decision === 'denied' ? 'Denied' : 'Completed') : 
+                    'In Progress';
+                
+                // Get status color
+                const statusColor = finalStatus === 'Denied' ? '#dc3545' : 
+                                  finalStatus === 'Completed' ? '#28a745' : '#007bff';
+
+                html += `
+                    <div style="margin-bottom: 1.5rem; padding: 1rem; border: 1px solid #e9ecef; border-radius: 0.5rem; background-color: #f8f9fa;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                            <h5 style="margin: 0; color: #495057; font-weight: 600;">${claimId}</h5>
+                            <span style="padding: 0.25rem 0.75rem; border-radius: 1rem; font-size: 0.85rem; font-weight: 500; color: white; background-color: ${statusColor};">
+                                ${finalStatus}
+                            </span>
+                        </div>
+                        
+                        <div style="color: #6c757d; font-size: 0.9rem; margin-bottom: 0.75rem;">
+                            <strong>Steps Completed:</strong> ${steps.length} | 
+                            <strong>Last Updated:</strong> ${new Date(latestStep.timestamp).toLocaleString()}
+                        </div>
+                        
+                        <div style="max-height: 200px; overflow-y: auto;">
+                `;
+
+                // Show abbreviated steps
+                steps.forEach((step, stepIndex) => {
+                    const status = {
+                        'pending': { icon: 'clock', color: '#ffc107' },
+                        'in_progress': { icon: 'spinner', color: '#007bff' },
+                        'completed': { icon: 'check-circle', color: '#28a745' },
+                        'failed': { icon: 'exclamation-triangle', color: '#dc3545' },
+                        'skipped': { icon: 'forward', color: '#6c757d' }
+                    }[step.status] || { icon: 'clock', color: '#ffc107' };
+                    
+                    const cleanTitle = step.title.replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '').trim();
+                    
+                    html += `
+                        <div style="display: flex; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid #e9ecef;">
+                            <i class="fas fa-${status.icon}" style="color: ${status.color}; width: 16px; margin-right: 0.75rem;"></i>
+                            <div style="flex: 1;">
+                                <div style="font-weight: 500; color: #495057; font-size: 0.9rem;">${cleanTitle}</div>
+                                <div style="color: #868e96; font-size: 0.8rem;">${new Date(step.timestamp).toLocaleTimeString()}</div>
+                            </div>
+                        </div>
+                    `;
                 });
+
+                html += `
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
         }
 
         // Display recent history in the same container as processing steps
@@ -1155,26 +1411,39 @@
                 const response = await apiCall('/api/claims');
                 const claims = response.claims || [];
                 
-                displayClaims(claims);
+                // Store all claims and reset pagination
+                allClaims = claims;
+                currentPage = 1;
+                totalPages = Math.ceil(claims.length / claimsPerPage);
+                
+                displayClaims();
                 updateOverviewStats(claims);
                 
             } catch (error) {
                 console.error('Error loading claims:', error);
                 document.getElementById('claimsContainer').innerHTML = 
                     '<p style="text-align: center; color: #666; padding: 2rem;">Failed to load claims. Please try again.</p>';
+                hidePagination();
             }
         }
 
-        // Display claims in the grid with intelligent status handling
-        function displayClaims(claims) {
+        // Display claims in the grid with pagination support
+        function displayClaims() {
             const container = document.getElementById('claimsContainer');
             
-            if (claims.length === 0) {
+            if (allClaims.length === 0) {
                 container.innerHTML = '<p style="text-align: center; color: #666; padding: 2rem;">No claims found.</p>';
+                hidePagination();
                 return;
             }
             
-            container.innerHTML = claims.map(claim => {
+            // Calculate pagination
+            const startIndex = (currentPage - 1) * claimsPerPage;
+            const endIndex = startIndex + claimsPerPage;
+            const claimsToShow = allClaims.slice(startIndex, endIndex);
+            
+            // Display the claims for current page
+            container.innerHTML = claimsToShow.map(claim => {
                 // Intelligent status mapping
                 const smartStatus = getSmartClaimStatus(claim);
                 
@@ -1197,10 +1466,6 @@
                             <div class="detail-value">${claim.patientName || 'N/A'}</div>
                         </div>
                         <div class="detail-item">
-                            <div class="detail-label">Provider</div>
-                            <div class="detail-value">${claim.provider || 'N/A'}</div>
-                        </div>
-                        <div class="detail-item">
                             <div class="detail-label">Last Update</div>
                             <div class="detail-value">${claim.lastUpdate || claim.submitted}</div>
                         </div>
@@ -1211,19 +1476,11 @@
                         </div>
                         ` : ''}
                     </div>
-                    
-                    <div class="claim-actions">
-                        <button class="view-btn" onclick="viewClaimDetails('${claim.claimId}')">
-                            <i class="fas fa-eye"></i>
-                            View Details
-                        </button>
-                        <button class="chat-btn" onclick="openChatWithClaim('${claim.claimId}')">
-                            <i class="fas fa-comment"></i>
-                            Process via Chat
-                        </button>
-                    </div>
                 </div>`;
             }).join('');
+            
+            // Update pagination controls
+            updatePaginationControls();
         }
         
         // Smart claim status mapping for intelligent orchestrator
@@ -1279,18 +1536,160 @@
             document.getElementById('pendingClaims').textContent = pending;
         }
 
-        // Load processing steps with intelligent orchestrator support
+        // Pagination Functions
+        function updatePaginationControls() {
+            const paginationContainer = document.getElementById('paginationContainer');
+            const paginationInfo = document.getElementById('paginationInfo');
+            const prevBtn = document.getElementById('prevBtn');
+            const nextBtn = document.getElementById('nextBtn');
+            const pageNumbers = document.getElementById('pageNumbers');
+            
+            if (allClaims.length === 0) {
+                hidePagination();
+                return;
+            }
+            
+            // Show pagination container
+            paginationContainer.style.display = 'flex';
+            
+            // Update pagination info
+            const startItem = (currentPage - 1) * claimsPerPage + 1;
+            const endItem = Math.min(currentPage * claimsPerPage, allClaims.length);
+            paginationInfo.textContent = `Showing ${startItem}-${endItem} of ${allClaims.length} claims`;
+            
+            // Update previous button
+            prevBtn.disabled = currentPage === 1;
+            
+            // Update next button
+            nextBtn.disabled = currentPage === totalPages;
+            
+            // Generate page numbers
+            generatePageNumbers();
+        }
+        
+        function generatePageNumbers() {
+            const pageNumbers = document.getElementById('pageNumbers');
+            pageNumbers.innerHTML = '';
+            
+            // Show max 7 page numbers with ellipsis
+            const maxVisible = 7;
+            let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+            let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+            
+            // Adjust start if we're near the end
+            if (endPage - startPage < maxVisible - 1) {
+                startPage = Math.max(1, endPage - maxVisible + 1);
+            }
+            
+            // Always show first page
+            if (startPage > 1) {
+                pageNumbers.appendChild(createPageButton(1));
+                if (startPage > 2) {
+                    pageNumbers.appendChild(createEllipsis());
+                }
+            }
+            
+            // Show page range
+            for (let i = startPage; i <= endPage; i++) {
+                pageNumbers.appendChild(createPageButton(i));
+            }
+            
+            // Always show last page
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) {
+                    pageNumbers.appendChild(createEllipsis());
+                }
+                pageNumbers.appendChild(createPageButton(totalPages));
+            }
+        }
+        
+        function createPageButton(pageNum) {
+            const button = document.createElement('div');
+            button.className = `page-number ${pageNum === currentPage ? 'active' : ''}`;
+            button.textContent = pageNum;
+            button.onclick = () => goToPage(pageNum);
+            return button;
+        }
+        
+        function createEllipsis() {
+            const ellipsis = document.createElement('div');
+            ellipsis.className = 'page-number ellipsis';
+            ellipsis.textContent = '...';
+            return ellipsis;
+        }
+        
+        function goToPage(pageNum) {
+            if (pageNum >= 1 && pageNum <= totalPages) {
+                currentPage = pageNum;
+                displayClaims();
+            }
+        }
+        
+        function goToPreviousPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                displayClaims();
+            }
+        }
+        
+        function goToNextPage() {
+            if (currentPage < totalPages) {
+                currentPage++;
+                displayClaims();
+            }
+        }
+        
+        function hidePagination() {
+            const paginationContainer = document.getElementById('paginationContainer');
+            paginationContainer.style.display = 'none';
+        }
+
+        // Load processing steps with dynamic workflow tracking
         async function loadProcessingSteps() {
             try {
-                const response = await apiCall('/api/processing-steps');
-                let steps = response.steps || [];
+                // Use the local proxy route instead of direct connection to port 8001
+                const response = await fetch('/workflow-steps');
                 
-                // Handle intelligent orchestrator workflow results
-                if (response.workflow_results && response.workflow_results.steps) {
-                    steps = transformIntelligentOrchestatorSteps(response.workflow_results.steps);
+                if (response.ok) {
+                    const data = await response.json();
+                    const workflows = data.workflows || {};
+                    
+                    // Get the most recent workflow (latest session)
+                    const sessions = Object.keys(workflows);
+                    if (sessions.length > 0) {
+                        // Sort sessions by most recent activity
+                        const sortedSessions = sessions.sort((a, b) => {
+                            const aSteps = workflows[a] || [];
+                            const bSteps = workflows[b] || [];
+                            const aLatest = aSteps.length > 0 ? aSteps[aSteps.length - 1].timestamp : '';
+                            const bLatest = bSteps.length > 0 ? bSteps[bSteps.length - 1].timestamp : '';
+                            return bLatest.localeCompare(aLatest);
+                        });
+                        
+                        const latestSession = sortedSessions[0];
+                        const steps = workflows[latestSession] || [];
+                        
+                        if (steps.length > 0) {
+                            displayDynamicProcessingSteps(steps);
+                        } else {
+                            document.getElementById('activityLog').innerHTML = 
+                                '<p style="text-align: center; color: #666; padding: 1rem;">No processing steps recorded.</p>';
+                        }
+                    } else {
+                        document.getElementById('activityLog').innerHTML = 
+                            '<p style="text-align: center; color: #666; padding: 1rem;">No processing steps recorded.</p>';
+                    }
+                } else {
+                    // Fallback to old API if dynamic workflow API is not available
+                    const fallbackResponse = await apiCall('/api/processing-steps');
+                    let steps = fallbackResponse.steps || [];
+                    
+                    if (fallbackResponse.workflow_results && fallbackResponse.workflow_results.steps) {
+                        steps = transformIntelligentOrchestatorSteps(fallbackResponse.workflow_results.steps);
+                    }
+                    
+                    displayProcessingSteps(steps);
                 }
-                
-                displayProcessingSteps(steps);
                 
             } catch (error) {
                 console.error('Error loading processing steps:', error);
@@ -1339,6 +1738,63 @@
                     statusClass: statusClass
                 };
             });
+        }
+
+        // Display dynamic workflow steps with claim ID, title, and description
+        function displayDynamicProcessingSteps(steps) {
+            const container = document.getElementById('activityLog');
+            
+            if (!steps || steps.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666; padding: 1rem;">No processing steps recorded.</p>';
+                return;
+            }
+
+            // Get claim ID from the first step
+            const claimId = steps[0]?.claim_id || 'Unknown';
+            
+            // Update the section title to include claim ID
+            const sectionTitle = document.getElementById('sectionTitle');
+            sectionTitle.textContent = `Processing Steps - ${claimId}`;
+
+            let html = '';
+            
+            steps.forEach((step, index) => {
+                // Map status to icon and class
+                const statusMapping = {
+                    'pending': { icon: 'clock', class: 'pending', color: '#ffc107' },
+                    'in_progress': { icon: 'spinner fa-spin', class: 'process', color: '#007bff' },
+                    'completed': { icon: 'check-circle', class: 'complete', color: '#28a745' },
+                    'failed': { icon: 'exclamation-triangle', class: 'error', color: '#dc3545' },
+                    'skipped': { icon: 'forward', class: 'skipped', color: '#6c757d' }
+                };
+                
+                const status = statusMapping[step.status] || statusMapping['pending'];
+                
+                // Format timestamp
+                const timestamp = new Date(step.timestamp).toLocaleString();
+                
+                // Clean up title (remove Unicode characters if needed)
+                const cleanTitle = step.title.replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '').trim();
+                
+                html += `
+                    <div class="step ${status.class}" style="margin-bottom: 1rem; padding: 1rem; border-left: 4px solid ${status.color}; background-color: #f8f9fa; border-radius: 0.375rem;">
+                        <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                            <i class="fas fa-${status.icon}" style="color: ${status.color}; margin-right: 0.5rem; width: 16px;"></i>
+                            <strong style="font-size: 1.1rem; color: #495057;">${cleanTitle}</strong>
+                        </div>
+                        <div style="color: #6c757d; font-size: 0.95rem; line-height: 1.4; margin-bottom: 0.5rem;">
+                            ${step.description}
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; color: #868e96;">
+                            <span>Step ${index + 1} of ${steps.length}</span>
+                            <span>${timestamp}</span>
+                        </div>
+                        ${step.duration_ms ? `<div style="font-size: 0.8rem; color: #28a745; margin-top: 0.25rem;">⏱️ Completed in ${step.duration_ms}ms</div>` : ''}
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
         }
 
         // Display processing steps with intelligent orchestrator support
@@ -1544,6 +2000,9 @@
         
         // Close chat modal
         function closeChat() {
+            // Stop any ongoing workflow polling
+            stopWorkflowPolling();
+            
             document.getElementById('chatOverlay').classList.remove('active');
         }
         
@@ -1734,7 +2193,7 @@
             }
         }
 
-        // Enhanced progress tracking for claim processing - simplified without hardcoded messages
+        // Enhanced progress tracking for claim processing - uses dynamic workflow steps
         function showProcessingProgress(message) {
             const claimId = extractClaimId(message);
             
@@ -1742,10 +2201,83 @@
             
 ⏳ **Processing Time:** May take 3-8 minutes for complex claims
 📊 **Agents Working:** Coverage Rules, Document Intelligence, Intake Clarifier
-🔄 **Please wait** - No timeout, processing will complete when ready`);
+🔄 **Please wait** - Real-time progress tracking enabled`);
 
-            // No hardcoded progress messages - let the actual agent responses show progress
+            // Start polling for dynamic workflow steps
+            startWorkflowPolling(chatSessionId);
+            
             return null; // No interval to clear
+        }
+
+        // Start polling for workflow steps from the orchestrator
+        let workflowPollingInterval = null;
+        let lastDisplayedStepCount = 0;
+        
+        function startWorkflowPolling(sessionId) {
+            if (workflowPollingInterval) {
+                clearInterval(workflowPollingInterval);
+            }
+            
+            // Poll every 2 seconds for workflow updates
+            workflowPollingInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/workflow-steps/${sessionId}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.steps && data.steps.length > lastDisplayedStepCount) {
+                            displayNewWorkflowSteps(data.steps);
+                            lastDisplayedStepCount = data.steps.length;
+                        }
+                    }
+                } catch (error) {
+                    console.log('Workflow polling error (normal during processing):', error);
+                }
+            }, 2000);
+        }
+        
+        function stopWorkflowPolling() {
+            if (workflowPollingInterval) {
+                clearInterval(workflowPollingInterval);
+                workflowPollingInterval = null;
+                lastDisplayedStepCount = 0;
+            }
+        }
+        
+        function displayNewWorkflowSteps(steps) {
+            // Display only new steps since the last update
+            const newSteps = steps.slice(lastDisplayedStepCount);
+            
+            newSteps.forEach(step => {
+                let stepMessage = `📋 **${step.title}**`;
+                
+                if (step.description) {
+                    stepMessage += `\n\n${step.description}`;
+                }
+                
+                // Add status indicator
+                const statusIcon = {
+                    'pending': '⏳',
+                    'in_progress': '🔄',
+                    'completed': '✅',
+                    'failed': '❌',
+                    'skipped': '⏭️'
+                }[step.status] || '📋';
+                
+                stepMessage = `${statusIcon} ${stepMessage}`;
+                
+                // Add timing if available
+                if (step.duration_ms) {
+                    stepMessage += `\n\n⏱️ *Completed in ${step.duration_ms}ms*`;
+                }
+                
+                addMessageToChat('assistant', stepMessage);
+            });
+            
+            // Stop polling if we see a final decision step
+            const finalStep = steps[steps.length - 1];
+            if (finalStep && finalStep.step_type === 'final_decision') {
+                stopWorkflowPolling();
+            }
         }
 
         // Extract claim ID from message

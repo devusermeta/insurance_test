@@ -872,6 +872,46 @@ async def get_workflow_history(claim_id: str):
             "error": str(e)
         }
 
+# ============= DYNAMIC WORKFLOW API PROXY ROUTES =============
+# Proxy routes to forward requests to Claims Orchestrator API at localhost:8001
+
+@app.get("/workflow-steps")
+async def proxy_get_all_workflows():
+    """Proxy route: Get all workflows from Claims Orchestrator"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("http://localhost:8001/workflow-steps") as response:
+                if response.status == 200:
+                    data = await response.json()
+                    terminal_logger.log("SUCCESS", "PROXY", f"Retrieved workflows from orchestrator: {len(data.get('workflows', {}))} sessions")
+                    return data
+                else:
+                    terminal_logger.log("ERROR", "PROXY", f"Orchestrator API returned {response.status}")
+                    return {"workflows": {}}
+    except Exception as e:
+        terminal_logger.log("ERROR", "PROXY", f"Failed to connect to orchestrator: {str(e)}")
+        return {"workflows": {}}
+
+@app.get("/workflow-steps/{session_id}")
+async def proxy_get_session_workflows(session_id: str):
+    """Proxy route: Get workflow steps for specific session from Claims Orchestrator"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://localhost:8001/workflow-steps/{session_id}") as response:
+                if response.status == 200:
+                    data = await response.json()
+                    steps = data.get("steps", [])
+                    terminal_logger.log("SUCCESS", "PROXY", f"Retrieved {len(steps)} steps for session {session_id[:8]}...")
+                    return data
+                else:
+                    terminal_logger.log("ERROR", "PROXY", f"Orchestrator API returned {response.status} for session {session_id}")
+                    return {"steps": [], "session_id": session_id}
+    except Exception as e:
+        terminal_logger.log("ERROR", "PROXY", f"Failed to get session {session_id} from orchestrator: {str(e)}")
+        return {"steps": [], "session_id": session_id}
+
+# ============= END DYNAMIC WORKFLOW API PROXY =============
+
 @app.get("/api/processing-steps") 
 async def get_all_processing_steps():
     """Get real-time processing steps for actively processing claims"""

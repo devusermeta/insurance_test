@@ -108,6 +108,7 @@ def main(host, port):
     )
     
     logger.info("✅ Intelligent Claims Orchestrator with Azure AI ready!")
+    logger.info("📊 Workflow API endpoints available at /workflow-steps")
     
     # Apply custom filter to reduce agent.json polling noise
     import logging
@@ -115,7 +116,56 @@ def main(host, port):
     uvicorn_access_logger = logging.getLogger('uvicorn.access')
     uvicorn_access_logger.addFilter(AgentJsonFilter())
     logger.info("🚀 Starting enhanced orchestrator server...")
-    uvicorn.run(server.build(), host=host, port=port, log_level="info")
+    
+    # Build the server app
+    app = server.build()
+    
+    # Add CORS middleware to allow frontend connections
+    from starlette.middleware.cors import CORSMiddleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Allow all origins for development
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
+    # Add custom routes for workflow steps using Starlette routing
+    from starlette.routing import Route
+    from starlette.responses import JSONResponse
+    from shared.dynamic_workflow_logger import workflow_logger as dynamic_workflow_logger
+    
+    # Load existing workflow data on startup
+    logger.info("📊 Loading existing workflow data...")
+    dynamic_workflow_logger.load_from_file()
+    loaded_workflows = dynamic_workflow_logger.get_latest_workflows(limit=10)
+    logger.info(f"📋 Loaded {len(loaded_workflows)} existing workflow sessions")
+    
+    async def get_workflow_steps_handler(request):
+        """Get workflow steps for a specific session"""
+        try:
+            session_id = request.path_params['session_id']
+            steps = dynamic_workflow_logger.get_workflow_steps(session_id)
+            return JSONResponse({"steps": steps, "session_id": session_id})
+        except Exception as e:
+            return JSONResponse(
+                {"error": str(e), "session_id": session_id}, 
+                status_code=500
+            )
+    
+    async def get_latest_workflows_handler(request):
+        """Get the most recent workflow sessions"""
+        try:
+            workflows = dynamic_workflow_logger.get_latest_workflows(limit=5)
+            return JSONResponse({"workflows": workflows})
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+    
+    # Add the routes to the existing app
+    app.router.routes.append(Route("/workflow-steps/{session_id}", get_workflow_steps_handler, methods=["GET"]))
+    app.router.routes.append(Route("/workflow-steps", get_latest_workflows_handler, methods=["GET"]))
+    
+    uvicorn.run(app, host=host, port=port, log_level="info")
 
 def get_agent_card(host: str, port: int):
     """Returns the Agent Card for the Claims Orchestrator Agent."""

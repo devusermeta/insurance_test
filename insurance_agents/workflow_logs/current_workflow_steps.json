@@ -1,0 +1,77 @@
+{
+  "60d5c6ba-7b26-4242-8a24-e5da1c7390fb": [
+    {
+      "step_id": "b2f8118a-4460-4bc9-9021-83ddd7796bd4",
+      "workflow_id": "workflow_60d5c6ba-7b26-4242-8a24-e5da1c7390fb_1757670896",
+      "session_id": "60d5c6ba-7b26-4242-8a24-e5da1c7390fb",
+      "claim_id": "OP-04",
+      "step_type": "initialization",
+      "title": "\ud83d\ude80 Workflow Initialization",
+      "description": "Starting claims processing workflow for OP-04",
+      "status": "completed",
+      "timestamp": "2025-09-12T15:24:56.561765",
+      "duration_ms": null,
+      "details": {
+        "session_id": "60d5c6ba-7b26-4242-8a24-e5da1c7390fb",
+        "claim_id": "OP-04"
+      }
+    },
+    {
+      "step_id": "6d6ca8b4-e873-48b3-9f46-1d7632c315d8",
+      "session_id": "60d5c6ba-7b26-4242-8a24-e5da1c7390fb",
+      "step_type": "claim_extraction",
+      "title": "\ud83d\udcca Extracting Claim Details",
+      "description": "Retrieving comprehensive claim data for OP-04 from database",
+      "status": "in_progress",
+      "timestamp": "2025-09-12T15:24:56.564172",
+      "duration_ms": null,
+      "details": {
+        "claim_id": "OP-04",
+        "method": "Azure AI + MCP Tools"
+      }
+    },
+    {
+      "step_id": "7205c98c-275f-4533-9a45-534eae210f6a",
+      "session_id": "60d5c6ba-7b26-4242-8a24-e5da1c7390fb",
+      "step_type": "user_confirmation",
+      "title": "\u2705 User Confirmation Received",
+      "description": "Employee confirmed to proceed with claim processing",
+      "status": "completed",
+      "timestamp": "2025-09-12T15:25:45.125298",
+      "duration_ms": null,
+      "details": {
+        "claim_id": "OP-04",
+        "user_response": "yes"
+      }
+    },
+    {
+      "step_id": "ed7362c5-2c82-4ffd-afd7-0c8afa8bcfe7",
+      "session_id": "60d5c6ba-7b26-4242-8a24-e5da1c7390fb",
+      "step_type": "coverage_evaluation",
+      "title": "\u2696\ufe0f Coverage Rules Evaluation",
+      "description": "Claim denied by coverage rules: \u2022  Claim denied - already approved",
+      "status": "failed",
+      "timestamp": "2025-09-12T15:25:46.084211",
+      "duration_ms": 11834,
+      "details": {
+        "claim_id": "OP-04",
+        "agent": "coverage_rules_engine"
+      }
+    },
+    {
+      "step_id": "12726379-8454-4938-8cb9-be0a841dfb2d",
+      "session_id": "60d5c6ba-7b26-4242-8a24-e5da1c7390fb",
+      "step_type": "final_decision",
+      "title": "\u274c Claim Denied",
+      "description": "Claim processing stopped due to coverage rules failure",
+      "status": "completed",
+      "timestamp": "2025-09-12T15:25:57.920355",
+      "duration_ms": null,
+      "details": {
+        "claim_id": "OP-04",
+        "reason": "\u2022  Claim denied - already approved",
+        "decision": "denied"
+      }
+    }
+  ]
+}
