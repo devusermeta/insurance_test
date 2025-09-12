@@ -1311,7 +1311,7 @@ async def chat_with_orchestrator(chat_request: ChatMessage):
                 "http://localhost:8001",  # Claims Orchestrator URL
                 json=a2a_payload,
                 headers={"Content-Type": "application/json"},
-                timeout=aiohttp.ClientTimeout(total=30)
+                timeout=aiohttp.ClientTimeout(total=600)  # 10 minutes - allow for complex claim processing
             ) as response:
                 
                 if response.status == 200:

@@ -1578,17 +1578,13 @@
             sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
             
             try {
-                // Enhanced timeout for real agent processing (5 minutes)
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
-                
                 // Show progress for long-running operations
                 const isClaimProcessing = message.toLowerCase().includes('process claim') || message.toLowerCase().includes('claim with');
                 if (isClaimProcessing) {
                     showProcessingProgress(message);
                 }
                 
-                // Send message to claims orchestrator with extended timeout
+                // Send message to claims orchestrator with NO TIMEOUT - wait indefinitely for result
                 const response = await fetch('/api/chat', {
                     method: 'POST',
                     headers: {
@@ -1598,11 +1594,9 @@
                         message: message,
                         sessionId: chatSessionId,
                         timestamp: new Date().toISOString()
-                    }),
-                    signal: controller.signal
+                    })
+                    // NO signal/timeout - wait indefinitely for orchestrator response
                 });
-                
-                clearTimeout(timeoutId);
                 
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
@@ -1624,26 +1618,10 @@
                 console.error('Chat error:', error);
                 removeTypingIndicator();
                 
-                // Enhanced error handling for timeout situations
+                // Enhanced error handling - only show errors for actual connection failures
                 let errorMessage = 'Sorry, I encountered an error. Please try again.';
                 
-                if (error.name === 'AbortError') {
-                    errorMessage = `⚠️ **Processing Timeout Notice**
-                    
-🔄 Your claim processing request has exceeded the 5-minute window.
-⏳ **This is normal for complex claims** that require:
-
-📋 **Coverage Rules Engine:** Policy validation
-📄 **Document Intelligence:** Medical document analysis  
-🩺 **Intake Clarifier:** Claim verification
-
-💡 **Next Steps:**
-• Check the claims list for your processed claim
-• Processing may continue in the background
-• Contact support if the claim doesn't appear within 10 minutes
-
-📞 **Support:** Claims are processed successfully in 95% of cases even with timeout messages.`;
-                } else if (error.message.includes('fetch')) {
+                if (error.message.includes('fetch') || error.message.includes('Failed to fetch')) {
                     errorMessage = `🔌 **Connection Error**
                     
 ❌ Unable to connect to the Claims Orchestrator.
@@ -1663,6 +1641,15 @@
 ⏳ **Expected Resolution:** 2-3 minutes
 
 💡 **Action:** Please try submitting your claim again in a few minutes.`;
+                } else {
+                    // For any other errors, provide a generic message
+                    errorMessage = `❌ **Processing Error**
+                    
+⚠️ An unexpected error occurred during claim processing.
+
+🔄 **Details:** ${error.message}
+
+💡 **Action:** Please try again. If the issue persists, contact support.`;
                 }
                 
                 addMessageToChat('error', errorMessage);
@@ -1741,18 +1728,19 @@
             }
         }
 
-        // Enhanced progress tracking for claim processing
+        // Enhanced progress tracking for claim processing - more encouraging messages
         function showProcessingProgress(message) {
             const claimId = extractClaimId(message);
             
             addMessageToChat('assistant', `🔄 **Starting Multi-Agent Processing for ${claimId}**
             
-⏳ **Expected Time:** 3-5 minutes
+⏳ **Processing Time:** May take 3-8 minutes for complex claims
 📊 **Agents Working:** Coverage Rules, Document Intelligence, Intake Clarifier
+🔄 **Please wait** - No timeout, processing will complete when ready
 
 🔍 **Progress Updates:**`);
 
-            // Show progress updates every 45 seconds
+            // Show progress updates every 30 seconds (more frequent)
             const progressMessages = [
                 '📋 **Coverage Rules Engine:** Analyzing policy terms and coverage limits...',
                 '📄 **Document Intelligence:** Processing uploaded medical documents...',
@@ -1760,7 +1748,10 @@
                 '🔍 **Intake Clarifier:** Reviewing claim details for completeness...',
                 '✅ **Intake Clarifier:** Performing final validation and approval checks...',
                 '📊 **Orchestrator:** Compiling results and generating final decision...',
-                '🎯 **Final Step:** Preparing claim decision report...'
+                '🎯 **Final Step:** Preparing claim decision report...',
+                '⏳ **Almost Done:** Finalizing approval/denial decision...',
+                '🔄 **Still Processing:** Complex claims require thorough analysis...',
+                '💪 **Patience Appreciated:** Quality processing takes time...'
             ];
             
             let currentStep = 0;
@@ -1769,10 +1760,10 @@
                     addMessageToChat('assistant', progressMessages[currentStep]);
                     currentStep++;
                 } else {
-                    clearInterval(progressInterval);
-                    addMessageToChat('assistant', '⌛ **Processing Complete Soon** - Finalizing results...');
+                    // Loop back to encouraging messages
+                    currentStep = 7; // Start from "Almost Done" message
                 }
-            }, 45000); // Show progress every 45 seconds
+            }, 30000); // Show progress every 30 seconds
             
             return progressInterval;
         }
