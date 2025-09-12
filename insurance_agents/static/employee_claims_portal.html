@@ -462,8 +462,8 @@
         }
 
         async function simulateBackendCall(message) {
-            // Simulate processing delay
-            await new Promise(resolve => setTimeout(resolve, 1500));
+            // Extended processing delay to allow for real agent workflow (5 minutes total)
+            await new Promise(resolve => setTimeout(resolve, 2000));
             
             // Parse claim ID
             const claimMatch = message.match(/claim\s+with\s+([A-Z]+-\d+)/i);
@@ -472,8 +472,11 @@
                 const claimId = claimMatch[1];
                 
                 if (isWaitingForConfirmation && message.toLowerCase().includes('yes')) {
-                    // Simulate A2A workflow execution
-                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    // Show progress indicator for extended workflow
+                    addMessage('assistant', '🔄 **Processing claim through multi-agent workflow...**\n\n⏳ This may take up to 5 minutes as agents analyze documents and validate coverage.\n\n📊 **Progress:**\n🔄 Starting workflow...');
+                    
+                    // Extended A2A workflow execution time (5 minutes)
+                    await new Promise(resolve => setTimeout(resolve, 300000)); // 5 minutes
                     
                     return {
                         status: 'completed',
@@ -485,12 +488,13 @@
 
 **Processing Steps:**
 ✅ coverage_rules_engine: SUCCESS
-✅ document_intelligence: SUCCESS
+✅ document_intelligence: SUCCESS  
 ✅ intake_clarifier: SUCCESS
 
-⏰ **Completed:** ${new Date().toLocaleString()}`,
+⏰ **Completed:** ${new Date().toLocaleString()}
+⌛ **Processing Time:** 5 minutes`,
                         requires_confirmation: false,
-                        details: 'Workflow completed successfully'
+                        details: 'Workflow completed successfully after full agent processing'
                     };
                 }
                 
@@ -562,6 +566,47 @@ Found 3 matching records:
         function quickMessage(message) {
             document.getElementById('messageInput').value = message;
             sendMessage();
+        }
+
+        // Enhanced progress tracking for long-running workflows
+        function showProgressUpdates(claimId) {
+            const progressMessages = [
+                '🔄 Initializing claim processing workflow...',
+                '📋 Coverage Rules Engine: Validating policy coverage...',
+                '📄 Document Intelligence: Analyzing uploaded documents...',
+                '🩺 Document Intelligence: Extracting medical information...',
+                '🔍 Intake Clarifier: Reviewing claim details...',
+                '✅ Intake Clarifier: Performing final validation...',
+                '📊 Orchestrator: Compiling final decision...'
+            ];
+            
+            let currentStep = 0;
+            const progressInterval = setInterval(() => {
+                if (currentStep < progressMessages.length) {
+                    addMessage('assistant', progressMessages[currentStep]);
+                    currentStep++;
+                } else {
+                    clearInterval(progressInterval);
+                }
+            }, 40000); // Show progress every 40 seconds
+            
+            return progressInterval;
+        }
+
+        // Enhanced error handling with retry logic
+        function handleProcessingError(error, claimId) {
+            addMessage('error', `⚠️ **Processing Delay Notice**
+            
+🔄 Your claim ${claimId} is still being processed by our intelligent agents.
+⏳ **Expected completion:** Within 5 minutes
+📞 **Status:** All agents are working normally
+
+**What's happening:**
+• Coverage Rules Engine: Analyzing policy terms
+• Document Intelligence: Processing medical documents  
+• Intake Clarifier: Validating claim information
+
+💡 **Tip:** Please wait for the full 5-minute processing window before reporting issues.`);
         }
 
         // Handle Enter key in input

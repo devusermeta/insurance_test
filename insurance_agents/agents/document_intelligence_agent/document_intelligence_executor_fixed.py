@@ -500,15 +500,21 @@ If no URLs found, return: []
         
         # For inpatient claims, add discharge summary if available
         if "discharge_summary_doc" in extracted_data:
+            # Use extracted patient_name as primary source, claim_info as fallback
+            extracted_patient_name = extracted_data["discharge_summary_doc"].get("patient_name", "")
+            fallback_patient_name = claim_info.get('patient_name', 'Unknown')
+            final_patient_name = extracted_patient_name if extracted_patient_name else fallback_patient_name
+            
             discharge_data = {
-                "patient_name": claim_info.get('patient_name', 'Unknown'),
+                "patient_name": final_patient_name,
                 "hospital_name": extracted_data["discharge_summary_doc"].get("hospital_name", "Unknown Hospital"),
                 "admit_date": extracted_data["discharge_summary_doc"].get("admit_date", "Unknown"),
                 "discharge_date": extracted_data["discharge_summary_doc"].get("discharge_date", "Unknown"),
                 "medical_condition": claim_info.get('diagnosis', 'Unknown condition')
             }
             extracted_document["discharge_summary_doc"] = discharge_data
-            self.logger.info(f"📄 Added discharge_summary_doc: {discharge_data}")
+            self.logger.info(f"📄 Added discharge_summary_doc with corrected patient_name: {discharge_data}")
+            self.logger.info(f"🔍 Patient name sources - Extracted: '{extracted_patient_name}', Claim info: '{fallback_patient_name}', Final: '{final_patient_name}'")
         
         self.logger.info(f"📄 FINAL DOCUMENT TO WRITE: {extracted_document}")
         

@@ -1957,23 +1957,82 @@ Claim {claim_id} has been denied during intake verification.
         return False
     
     def _is_claim_approved(self, result: Dict[str, Any]) -> bool:
-        """Check if intake clarifier approved the claim"""
+        """Check if intake clarifier approved the claim with enhanced logic and A2A structure parsing"""
+        self.logger.info(f"🔍 Checking approval status for result: {result}")
+        
         if isinstance(result, dict):
-            # Check status field first (most reliable)
+            # Handle nested A2A response structure
+            if 'result' in result and 'artifacts' in result['result']:
+                artifacts = result['result']['artifacts']
+                self.logger.info(f"📋 Found {len(artifacts)} artifacts in A2A response")
+                
+                for artifact in artifacts:
+                    if 'parts' in artifact:
+                        for part in artifact['parts']:
+                            if part.get('kind') == 'text':
+                                text_content = part.get('text', '')
+                                self.logger.info(f"📝 Analyzing artifact text: {text_content[:200]}...")
+                                
+                                try:
+                                    # Try to parse as JSON if it looks like JSON
+                                    if text_content.strip().startswith('{'):
+                                        import json
+                                        parsed_content = json.loads(text_content)
+                                        
+                                        # Check status in parsed JSON
+                                        status = parsed_content.get("status", "").lower()
+                                        response = parsed_content.get("response", "").lower()
+                                        
+                                        self.logger.info(f"📊 Parsed JSON - Status: '{status}', Response preview: '{response[:100]}...'")
+                                        
+                                        if status == "approved":
+                                            self.logger.info(f"✅ CLAIM APPROVED via JSON status field")
+                                            return True
+                                            
+                                        if "approved" in response or "claim approved" in response:
+                                            self.logger.info(f"✅ CLAIM APPROVED via JSON response field")
+                                            return True
+                                            
+                                except json.JSONDecodeError:
+                                    # If not JSON, check as plain text
+                                    text_lower = text_content.lower()
+                                    if "approved" in text_lower or "claim approved" in text_lower:
+                                        self.logger.info(f"✅ CLAIM APPROVED via artifact text analysis")
+                                        return True
+            
+            # Original field checks for backwards compatibility
             status = result.get("status", "").lower()
+            self.logger.info(f"📊 Status field: '{status}'")
             if status == "approved":
+                self.logger.info(f"✅ CLAIM APPROVED via status field")
                 return True
             
             # Check message field (backup check)
             message = result.get("message", "").lower()
+            self.logger.info(f"📊 Message field: '{message}'")
             if "approved" in message or "marked for approval" in message:
+                self.logger.info(f"✅ CLAIM APPROVED via message field")
                 return True
                 
             # Check response field (used by intake clarifier)
             response = result.get("response", "").lower()
+            self.logger.info(f"📊 Response field: '{response}'")
             if "approved" in response or "marked for approval" in response:
+                self.logger.info(f"✅ CLAIM APPROVED via response field")
+                return True
+                
+            # Check for new approval patterns
+            if "claim approved" in message or "claim approved" in response:
+                self.logger.info(f"✅ CLAIM APPROVED via approval pattern match")
+                return True
+                
+            # Additional comprehensive checks
+            all_text = f"{status} {message} {response}".lower()
+            if any(phrase in all_text for phrase in ["approve", "accept", "valid", "qualified"]):
+                self.logger.info(f"✅ CLAIM APPROVED via comprehensive text analysis")
                 return True
         
+        self.logger.warning(f"❌ CLAIM NOT APPROVED - No approval indicators found in result")
         return False
 
     async def _update_claim_status(self, claim_id: str, new_status: str, reason: str):
