@@ -1062,7 +1062,7 @@
                 </div>
                 <div class="overview-card">
                     <h3 id="pendingClaims">0</h3>
-                    <p>Pending</p>
+                    <p>Submitted</p>
                 </div>
             </div>
         </section>
@@ -1105,30 +1105,33 @@
             </div>
         </section>
 
-        <!-- Processing Steps Section -->
+        <!-- Recent History Section -->
         <section class="activity-section">
             <div class="section-header">
                 <h2 class="section-title">
-                    <i class="fas fa-cogs"></i>
-                    <span id="sectionTitle">Processing Steps</span>
+                    <i class="fas fa-history"></i>
+                    <span id="sectionTitle">Recent Workflow History</span>
                 </h2>
+                <!-- Commented out toggle controls - only showing Recent History now -->
+                <!--
                 <div class="toggle-controls">
                     <button id="toggleViewBtn" class="toggle-btn active" onclick="toggleView()">
                         <i class="fas fa-history"></i>
                         Show Recent History
                     </button>
                 </div>
+                -->
             </div>
             
             <div class="activity-log" id="activityLog">
-                <!-- Processing steps will be loaded here -->
+                <!-- Recent workflow history will be loaded here -->
             </div>
         </section>
     </main>
 
     <script>
-        // Global state for toggle functionality
-        let isShowingRecentHistory = false;
+        // Global state for toggle functionality - commented out since we only show Recent History now
+        // let isShowingRecentHistory = false;
         
         // Pagination state
         let allClaims = []; // Store all claims
@@ -1136,6 +1139,8 @@
         const claimsPerPage = 5;
         let totalPages = 1;
         
+        // Commented out toggle functionality - only showing Recent History now
+        /*
         // Toggle between Processing Steps and Recent History
         function toggleView() {
             const toggleBtn = document.getElementById('toggleViewBtn');
@@ -1157,29 +1162,86 @@
                 toggleBtn.classList.add('active');
             }
         }
+        */
         
         // Initialize intelligent claims dashboard
         document.addEventListener('DOMContentLoaded', function() {
             console.log('🧠 Intelligent Claims Dashboard initializing...');
-            console.log('🔧 Supporting Hybrid Intelligence & Dynamic Processing Steps with Toggle View');
+            console.log('🔧 Supporting Recent Workflow History View');
             
             loadClaims();
-            loadProcessingSteps(); // Start with Processing Steps view
+            loadRecentHistory(); // Start with Recent History view only
             
-            // Periodic updates for claims data (60 second refresh)
-            setInterval(() => {
-                refreshClaims();
-                
-                // Only refresh the current active view
-                if (isShowingRecentHistory) {
-                    loadRecentHistory();
-                } else {
-                    loadProcessingSteps();
-                }
-            }, 60000); // Update every 60 seconds for periodic refresh
+            // Start smart auto-refresh system
+            startSmartAutoRefresh();
             
             console.log('✅ Intelligent Claims Dashboard ready!');
         });
+        
+        // Smart auto-refresh system for active vs completed workflows
+        let refreshInterval = null;
+        let lastRefreshTime = null;
+        
+        function startSmartAutoRefresh() {
+            // Stop any existing interval
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+            
+            // Smart refresh logic:
+            // - Check for workflow updates every 10 seconds
+            // - Check claims data every 60 seconds (for general updates)
+            let refreshCounter = 0;
+            
+            refreshInterval = setInterval(() => {
+                refreshCounter++;
+                lastRefreshTime = new Date();
+                
+                // Add visual feedback for refresh activity
+                updateRefreshIndicator(true);
+                
+                // Refresh Recent History view every 10 seconds
+                loadRecentHistory();
+                
+                // Refresh claims data every 60 seconds (6 × 10s intervals)
+                if (refreshCounter % 6 === 0) {
+                    refreshClaims();
+                }
+                
+                // Remove visual feedback after a short delay
+                setTimeout(() => updateRefreshIndicator(false), 1000);
+                
+            }, 10000); // Check every 10 seconds for workflow updates
+            
+            console.log('🔄 Smart auto-refresh started (10s active check, 60s claims refresh)');
+        }
+        
+        function stopSmartAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+                console.log('🛑 Smart auto-refresh stopped');
+            }
+        }
+        
+        function updateRefreshIndicator(isRefreshing) {
+            const sectionTitle = document.getElementById('sectionTitle');
+            const toggleBtn = document.getElementById('toggleViewBtn');
+            
+            if (isRefreshing) {
+                // Add spinning indicator
+                if (sectionTitle && !sectionTitle.innerHTML.includes('fa-sync')) {
+                    const currentText = sectionTitle.textContent || sectionTitle.innerHTML;
+                    sectionTitle.innerHTML = `${currentText} <i class="fas fa-sync fa-spin" style="color: #28a745; margin-left: 0.5rem; font-size: 0.8rem;"></i>`;
+                }
+            } else {
+                // Remove spinning indicator
+                if (sectionTitle && sectionTitle.innerHTML.includes('fa-sync')) {
+                    const textOnly = sectionTitle.textContent.replace(/\s*$/, ''); // Clean text only
+                    sectionTitle.textContent = textOnly;
+                }
+            }
+        }
 
         // API calls
         async function apiCall(endpoint, options = {}) {
@@ -1242,12 +1304,11 @@
                                 const bLatest = bSteps.length > 0 ? bSteps[bSteps.length - 1].timestamp : '';
                                 return bLatest.localeCompare(aLatest);
                             })
-                            .slice(0, 2); // Get last 2 claims
+                            .slice(0, 2); // Get last 2 workflows
                         
                         displayRecentHistoryFromDynamicWorkflows(workflows, sortedSessions);
                     } else {
-                        document.getElementById('activityLog').innerHTML = 
-                            '<p style="text-align: center; color: #666; padding: 1rem;">No recent history available.</p>';
+                        showNoRecentHistory();
                     }
                 } else {
                     // Fallback to old API
@@ -1257,14 +1318,40 @@
                     if (fallbackData.status === 'success' && fallbackData.steps && fallbackData.steps.length > 0) {
                         displayRecentHistoryInProcessingContainer(fallbackData.steps);
                     } else {
-                        document.getElementById('activityLog').innerHTML = 
-                            '<p style="text-align: center; color: #666; padding: 1rem;">No recent history available.</p>';
+                        showNoRecentHistory();
                     }
                 }
             } catch (error) {
                 console.error('Error loading recent history:', error);
                 document.getElementById('activityLog').innerHTML = 
                     '<p style="text-align: center; color: #666; padding: 1rem;">Failed to load recent history.</p>';
+            }
+        }
+        
+        // Show empty state when no recent history
+        function showNoRecentHistory() {
+            const container = document.getElementById('activityLog');
+            
+            container.innerHTML = `
+                <div style="text-align: center; padding: 3rem 1rem; color: #6c757d;">
+                    <i class="fas fa-history" style="font-size: 3rem; color: #dee2e6; margin-bottom: 1rem;"></i>
+                    <h4 style="color: #495057; margin-bottom: 0.5rem;">No Recent History</h4>
+                    <p style="margin-bottom: 1.5rem;">Completed claims will appear here after processing</p>
+                    <div style="display: flex; justify-content: center; gap: 1rem;">
+                        <button onclick="openChat()" style="padding: 0.5rem 1rem; background: #007bff; color: white; border: none; border-radius: 0.375rem; cursor: pointer;">
+                            <i class="fas fa-plus"></i> Process New Claim
+                        </button>
+                        <button onclick="toggleView()" style="padding: 0.5rem 1rem; background: #17a2b8; color: white; border: none; border-radius: 0.375rem; cursor: pointer;">
+                            <i class="fas fa-cog"></i> View Processing Steps
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            // Update section title
+            const sectionTitle = document.getElementById('sectionTitle');
+            if (sectionTitle) {
+                sectionTitle.textContent = 'Recent History - No Completed Claims';
             }
         }
 
@@ -1501,10 +1588,17 @@
                 }
             }
             
-            // Handle traditional status
-            const status = claim.status ? claim.status.toLowerCase() : 'pending';
+            // Handle actual Cosmos DB status values
+            const status = claim.status ? claim.status.toLowerCase() : 'submitted';
             
             switch (status) {
+                case 'marked for approval':
+                    return { class: 'approved', display: 'MARKED FOR APPROVAL', action: 'Review' };
+                case 'marked for rejection':
+                    return { class: 'failed', display: 'MARKED FOR REJECTION', action: 'Review' };
+                case 'submitted':
+                    return { class: 'submitted', display: 'SUBMITTED', action: 'Process' };
+                // Legacy status handling (in case old data exists)
                 case 'completed':
                 case 'approved':
                     return { class: 'approved', display: 'APPROVED', action: 'Review' };
@@ -1515,25 +1609,38 @@
                 case 'error':
                 case 'declined':
                     return { class: 'failed', display: 'FAILED', action: 'Retry' };
-                case 'submitted':
-                    return { class: 'pending', display: 'SUBMITTED', action: 'Process' };
                 case 'pending':
                 default:
-                    return { class: 'pending', display: 'PENDING', action: 'Process' };
+                    return { class: 'submitted', display: 'SUBMITTED', action: 'Process' };
             }
         }
 
         // Update overview statistics
         function updateOverviewStats(claims) {
             const total = claims.length;
-            const processing = claims.filter(c => c.status === 'processing').length;
-            const approved = claims.filter(c => c.status === 'approved').length;
-            const pending = claims.filter(c => c.status === 'pending' || c.status === 'submitted').length;
+            // Count based on actual Cosmos DB status values
+            const processing = claims.filter(c => {
+                const status = c.status ? c.status.toLowerCase() : '';
+                return status === 'processing' || status === 'in_progress';
+            }).length;
+            const approved = claims.filter(c => {
+                const status = c.status ? c.status.toLowerCase() : '';
+                return status === 'marked for approval' || status === 'approved';
+            }).length;
+            const submitted = claims.filter(c => {
+                const status = c.status ? c.status.toLowerCase() : '';
+                return status === 'submitted';
+            }).length;
+            const rejected = claims.filter(c => {
+                const status = c.status ? c.status.toLowerCase() : '';
+                return status === 'marked for rejection' || status === 'rejected';
+            }).length;
             
             document.getElementById('totalClaims').textContent = total;
             document.getElementById('processingClaims').textContent = processing;
             document.getElementById('approvedClaims').textContent = approved;
-            document.getElementById('pendingClaims').textContent = pending;
+            // Use the pending field for submitted claims since that's what makes sense
+            document.getElementById('pendingClaims').textContent = submitted;
         }
 
         // Pagination Functions
@@ -1644,6 +1751,72 @@
             paginationContainer.style.display = 'none';
         }
 
+        // Smart workflow routing: determine if workflow is active or completed
+        function isWorkflowActive(steps) {
+            if (!steps || steps.length === 0) return false;
+            
+            const latestStep = steps[steps.length - 1];
+            const now = new Date();
+            const lastActivity = new Date(latestStep.timestamp);
+            const timeSinceLastActivity = (now - lastActivity) / 1000 / 60; // minutes
+            
+            // Consider workflow active if:
+            // 1. Has steps with 'in_progress' or 'pending' status, OR
+            // 2. Last activity was within 1 minute (grace period)
+            const hasActiveSteps = steps.some(step => 
+                step.status === 'in_progress' || step.status === 'pending'
+            );
+            
+            const withinGracePeriod = timeSinceLastActivity <= 1;
+            
+            // Workflow is active if it has active steps OR within grace period
+            return hasActiveSteps || withinGracePeriod;
+        }
+        
+        // Get active workflows for Processing Steps view
+        function getActiveWorkflows(workflows) {
+            const activeWorkflows = {};
+            
+            for (const [sessionId, steps] of Object.entries(workflows)) {
+                if (isWorkflowActive(steps)) {
+                    activeWorkflows[sessionId] = steps;
+                }
+            }
+            
+            return activeWorkflows;
+        }
+        
+        // Get completed workflows for Recent History view
+        function getCompletedWorkflows(workflows, limit = 2) {
+            const completedWorkflows = {};
+            
+            for (const [sessionId, steps] of Object.entries(workflows)) {
+                if (!isWorkflowActive(steps)) {
+                    completedWorkflows[sessionId] = steps;
+                }
+            }
+            
+            // Sort by most recent activity and limit
+            const sortedSessions = Object.keys(completedWorkflows)
+                .sort((a, b) => {
+                    const aSteps = completedWorkflows[a] || [];
+                    const bSteps = completedWorkflows[b] || [];
+                    const aLatest = aSteps.length > 0 ? aSteps[aSteps.length - 1].timestamp : '';
+                    const bLatest = bSteps.length > 0 ? bSteps[bSteps.length - 1].timestamp : '';
+                    return bLatest.localeCompare(aLatest);
+                })
+                .slice(0, limit);
+            
+            const result = {};
+            sortedSessions.forEach(sessionId => {
+                result[sessionId] = completedWorkflows[sessionId];
+            });
+            
+            return result;
+        }
+
+        // Commented out Processing Steps functionality - only showing Recent History now
+        /*
         // Load processing steps with dynamic workflow tracking
         async function loadProcessingSteps() {
             try {
@@ -1654,30 +1827,21 @@
                     const data = await response.json();
                     const workflows = data.workflows || {};
                     
-                    // Get the most recent workflow (latest session)
-                    const sessions = Object.keys(workflows);
-                    if (sessions.length > 0) {
-                        // Sort sessions by most recent activity
-                        const sortedSessions = sessions.sort((a, b) => {
-                            const aSteps = workflows[a] || [];
-                            const bSteps = workflows[b] || [];
-                            const aLatest = aSteps.length > 0 ? aSteps[aSteps.length - 1].timestamp : '';
-                            const bLatest = bSteps.length > 0 ? bSteps[bSteps.length - 1].timestamp : '';
-                            return bLatest.localeCompare(aLatest);
-                        });
-                        
-                        const latestSession = sortedSessions[0];
-                        const steps = workflows[latestSession] || [];
+                    // Simple check: Look for workflows with truly active steps (in_progress or pending)
+                    const activeSession = findActiveWorkflowSession(workflows);
+                    
+                    if (activeSession) {
+                        const steps = workflows[activeSession] || [];
                         
                         if (steps.length > 0) {
-                            displayDynamicProcessingSteps(steps);
+                            // Show live processing with active indicator
+                            displayDynamicProcessingSteps(steps, true); // true = isActive
                         } else {
-                            document.getElementById('activityLog').innerHTML = 
-                                '<p style="text-align: center; color: #666; padding: 1rem;">No processing steps recorded.</p>';
+                            showNoActiveProcessing();
                         }
                     } else {
-                        document.getElementById('activityLog').innerHTML = 
-                            '<p style="text-align: center; color: #666; padding: 1rem;">No processing steps recorded.</p>';
+                        // No truly active processing - show empty state
+                        showNoActiveProcessing();
                     }
                 } else {
                     // Fallback to old API if dynamic workflow API is not available
@@ -1697,6 +1861,57 @@
                     '<p style="text-align: center; color: #666; padding: 1rem;">Failed to load processing steps.</p>';
             }
         }
+        
+        // Find session with truly active processing (in_progress or pending steps)
+        function findActiveWorkflowSession(workflows) {
+            for (const [sessionId, steps] of Object.entries(workflows)) {
+                if (steps && steps.length > 0) {
+                    // Check if any step is currently in_progress or pending
+                    const hasActiveStep = steps.some(step => 
+                        step.status === 'in_progress' || step.status === 'pending'
+                    );
+                    
+                    if (hasActiveStep) {
+                        console.log(`🔴 Found active processing in session: ${sessionId}`);
+                        return sessionId;
+                    }
+                }
+            }
+            
+            console.log('✅ No active processing detected');
+            return null;
+        }
+        */
+        
+        // Commented out Processing Steps functionality - only showing Recent History now
+        /*
+        // Show empty state when no active processing
+        function showNoActiveProcessing() {
+            const container = document.getElementById('activityLog');
+            
+            container.innerHTML = `
+                <div style="text-align: center; padding: 3rem 1rem; color: #6c757d;">
+                    <i class="fas fa-clock" style="font-size: 3rem; color: #dee2e6; margin-bottom: 1rem;"></i>
+                    <h4 style="color: #495057; margin-bottom: 0.5rem;">No Active Processing</h4>
+                    <p style="margin-bottom: 1.5rem;">Claims will appear here while being processed</p>
+                    <div style="display: flex; justify-content: center; gap: 1rem;">
+                        <button onclick="openChat()" style="padding: 0.5rem 1rem; background: #007bff; color: white; border: none; border-radius: 0.375rem; cursor: pointer;">
+                            <i class="fas fa-plus"></i> Process New Claim
+                        </button>
+                        <button onclick="toggleView()" style="padding: 0.5rem 1rem; background: #28a745; color: white; border: none; border-radius: 0.375rem; cursor: pointer;">
+                            <i class="fas fa-history"></i> View Recent History
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            // Update section title
+            const sectionTitle = document.getElementById('sectionTitle');
+            if (sectionTitle) {
+                sectionTitle.textContent = 'Processing Steps - Waiting for Claims';
+            }
+        }
+        */
 
         // Transform intelligent orchestrator steps to UI format
         function transformIntelligentOrchestatorSteps(orchestratorSteps) {
@@ -1741,7 +1956,7 @@
         }
 
         // Display dynamic workflow steps with claim ID, title, and description
-        function displayDynamicProcessingSteps(steps) {
+        function displayDynamicProcessingSteps(steps, isActive = false) {
             const container = document.getElementById('activityLog');
             
             if (!steps || steps.length === 0) {
@@ -1752,11 +1967,30 @@
             // Get claim ID from the first step
             const claimId = steps[0]?.claim_id || 'Unknown';
             
-            // Update the section title to include claim ID
+            // Update the section title to include claim ID and status
             const sectionTitle = document.getElementById('sectionTitle');
-            sectionTitle.textContent = `Processing Steps - ${claimId}`;
+            if (isActive) {
+                sectionTitle.innerHTML = `
+                    <span>Processing Steps - ${claimId}</span>
+                    <span style="margin-left: 0.5rem; padding: 0.25rem 0.5rem; background: #28a745; color: white; border-radius: 1rem; font-size: 0.75rem; animation: pulse 2s infinite;">
+                        🔴 LIVE
+                    </span>
+                `;
+            } else {
+                sectionTitle.textContent = `Processing Steps - ${claimId}`;
+            }
 
             let html = '';
+            
+            // Add live processing banner if active
+            if (isActive) {
+                html += `
+                    <div style="background: linear-gradient(135deg, #28a745, #20c997); color: white; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; text-align: center;">
+                        <i class="fas fa-cog fa-spin" style="margin-right: 0.5rem;"></i>
+                        <strong>Active Processing</strong> - This claim is currently being processed
+                    </div>
+                `;
+            }
             
             steps.forEach((step, index) => {
                 // Map status to icon and class
@@ -1776,11 +2010,25 @@
                 // Clean up title (remove Unicode characters if needed)
                 const cleanTitle = step.title.replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '').trim();
                 
+                // Add time since last activity for active workflows
+                let timeSinceActivity = '';
+                if (isActive && step.status === 'in_progress') {
+                    const now = new Date();
+                    const stepTime = new Date(step.timestamp);
+                    const minutesAgo = Math.floor((now - stepTime) / 1000 / 60);
+                    if (minutesAgo > 0) {
+                        timeSinceActivity = ` (${minutesAgo}m ago)`;
+                    } else {
+                        timeSinceActivity = ' (just now)';
+                    }
+                }
+                
                 html += `
                     <div class="step ${status.class}" style="margin-bottom: 1rem; padding: 1rem; border-left: 4px solid ${status.color}; background-color: #f8f9fa; border-radius: 0.375rem;">
                         <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
                             <i class="fas fa-${status.icon}" style="color: ${status.color}; margin-right: 0.5rem; width: 16px;"></i>
                             <strong style="font-size: 1.1rem; color: #495057;">${cleanTitle}</strong>
+                            ${timeSinceActivity ? `<span style="color: #868e96; font-size: 0.85rem; margin-left: auto;">${timeSinceActivity}</span>` : ''}
                         </div>
                         <div style="color: #6c757d; font-size: 0.95rem; line-height: 1.4; margin-bottom: 0.5rem;">
                             ${step.description}
