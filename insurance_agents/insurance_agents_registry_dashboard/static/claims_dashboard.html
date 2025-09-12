@@ -1009,6 +1009,37 @@
         .workflow-steps {
             margin-top: 1rem;
         }
+
+        /* Bootstrap Collapse Styles */
+        .collapse:not(.show) {
+            display: none;
+        }
+
+        .collapse.show {
+            display: block;
+        }
+
+        .collapsing {
+            height: 0;
+            overflow: hidden;
+            transition: height 0.35s ease;
+        }
+
+        /* Workflow Step Animation */
+        .workflow-step-item {
+            transition: all 0.3s ease;
+        }
+
+        .workflow-step-item:hover {
+            background-color: rgba(255, 255, 255, 0.1) !important;
+            transform: translateX(2px);
+        }
+
+        /* Enhanced status colors */
+        .status-completed { background-color: #d4edda; border-left-color: #28a745; }
+        .status-failed { background-color: #f8d7da; border-left-color: #dc3545; }
+        .status-in-progress { background-color: #cce5ff; border-left-color: #007bff; }
+        .status-pending { background-color: #fff3cd; border-left-color: #ffc107; }
     </style>
 </head>
 <body>
@@ -1283,7 +1314,7 @@
             }
         }
 
-        // Load recent history for the toggle view (last 2 workflows)
+        // Load recent history for the toggle view (showing all workflow logs)
         async function loadRecentHistory() {
             try {
                 // Use the local proxy route instead of direct connection to port 8001
@@ -1293,7 +1324,7 @@
                     const data = await response.json();
                     const workflows = data.workflows || {};
                     
-                    // Get all sessions sorted by most recent activity, limit to 2
+                    // Get all sessions sorted by most recent activity (show all, not just 2)
                     const sessions = Object.keys(workflows);
                     if (sessions.length > 0) {
                         const sortedSessions = sessions
@@ -1303,10 +1334,9 @@
                                 const aLatest = aSteps.length > 0 ? aSteps[aSteps.length - 1].timestamp : '';
                                 const bLatest = bSteps.length > 0 ? bSteps[bSteps.length - 1].timestamp : '';
                                 return bLatest.localeCompare(aLatest);
-                            })
-                            .slice(0, 2); // Get last 2 workflows
+                            });
                         
-                        displayRecentHistoryFromDynamicWorkflows(workflows, sortedSessions);
+                        displayDetailedRecentHistory(workflows, sortedSessions);
                     } else {
                         showNoRecentHistory();
                     }
@@ -1352,6 +1382,194 @@
             const sectionTitle = document.getElementById('sectionTitle');
             if (sectionTitle) {
                 sectionTitle.textContent = 'Recent History - No Completed Claims';
+            }
+        }
+
+        // Display detailed recent history from dynamic workflows (all claims with expandable step details)
+        function displayDetailedRecentHistory(workflows, sessions) {
+            const container = document.getElementById('activityLog');
+            
+            if (sessions.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #666; padding: 1rem;">No recent workflow history found.</p>';
+                return;
+            }
+
+            let html = `
+                <div style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #495057; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                        <i class="fas fa-history"></i> Recent Claims History
+                    </h4>
+                    <p style="color: #6c757d; margin: 0; font-size: 0.9rem;">
+                        Showing ${sessions.length} recent claim workflows from current_workflow_steps.json
+                    </p>
+                </div>
+            `;
+
+            sessions.forEach((sessionId, index) => {
+                const steps = workflows[sessionId] || [];
+                if (steps.length === 0) return;
+
+                const claimId = steps[0]?.claim_id || 'Unknown';
+                const latestStep = steps[steps.length - 1];
+                const workflowId = steps[0]?.workflow_id || sessionId;
+                
+                // Determine overall status
+                const hasErrors = steps.some(step => step.status === 'failed');
+                const hasInProgress = steps.some(step => step.status === 'in_progress');
+                const finalStatus = hasErrors ? 'Failed' : hasInProgress ? 'In Progress' : 'Completed';
+                
+                // Get status color
+                const statusColor = finalStatus === 'Failed' ? '#dc3545' : 
+                                  finalStatus === 'In Progress' ? '#007bff' : '#28a745';
+
+                // Get step counts
+                const completedSteps = steps.filter(step => step.status === 'completed').length;
+                const failedSteps = steps.filter(step => step.status === 'failed').length;
+                const inProgressSteps = steps.filter(step => step.status === 'in_progress').length;
+
+                // Create unique ID for this claim's collapsible content
+                const collapseId = `workflow_${index}`;
+
+                html += `
+                    <div style="margin-bottom: 1.5rem; border: 1px solid #e9ecef; border-radius: 0.75rem; background-color: #f8f9fa; overflow: hidden;">
+                        <!-- Claim Header -->
+                        <div style="padding: 1.25rem; background: linear-gradient(135deg, #2a5298, #1e3c72); color: white; cursor: pointer;" 
+                             onclick="toggleWorkflowDetails('${collapseId}')" data-bs-toggle="collapse" data-bs-target="#${collapseId}">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <h5 style="margin: 0 0 0.5rem 0; font-weight: 600; display: flex; align-items: center; gap: 0.5rem;">
+                                        <i class="fas fa-file-medical"></i>
+                                        Claim ID: ${claimId}
+                                    </h5>
+                                    <div style="font-size: 0.9rem; opacity: 0.9;">
+                                        Session: ${sessionId.substring(0, 20)}...
+                                    </div>
+                                </div>
+                                <div style="text-align: right;">
+                                    <span style="padding: 0.4rem 0.8rem; border-radius: 1rem; font-size: 0.85rem; font-weight: 500; background-color: ${statusColor}; color: white;">
+                                        ${finalStatus}
+                                    </span>
+                                    <div style="margin-top: 0.5rem; font-size: 0.85rem; opacity: 0.9;">
+                                        <i class="fas fa-chevron-down" id="chevron_${collapseId}"></i>
+                                        ${steps.length} total steps
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Step Summary Bar -->
+                        <div style="padding: 0.75rem 1.25rem; background-color: #ffffff; border-bottom: 1px solid #e9ecef;">
+                            <div style="display: flex; gap: 1rem; align-items: center; font-size: 0.9rem;">
+                                <span style="color: #28a745;"><i class="fas fa-check-circle"></i> ${completedSteps} completed</span>
+                                ${failedSteps > 0 ? `<span style="color: #dc3545;"><i class="fas fa-exclamation-triangle"></i> ${failedSteps} failed</span>` : ''}
+                                ${inProgressSteps > 0 ? `<span style="color: #007bff;"><i class="fas fa-spinner"></i> ${inProgressSteps} in progress</span>` : ''}
+                                <span style="color: #6c757d; margin-left: auto;">
+                                    Last updated: ${new Date(latestStep.timestamp).toLocaleString()}
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Collapsible Step Details -->
+                        <div class="collapse" id="${collapseId}">
+                            <div style="padding: 1rem 1.25rem; background-color: #ffffff;">
+                                <h6 style="color: #495057; margin-bottom: 1rem; font-weight: 600;">
+                                    <i class="fas fa-list-ol"></i> Workflow Steps Details:
+                                </h6>
+                `;
+
+                // Add each step with detailed information
+                steps.forEach((step, stepIndex) => {
+                    const stepNumber = stepIndex + 1;
+                    const status = {
+                        'pending': { icon: 'clock', color: '#ffc107', bgColor: '#fff3cd' },
+                        'in_progress': { icon: 'spinner fa-spin', color: '#007bff', bgColor: '#cce5ff' },
+                        'completed': { icon: 'check-circle', color: '#28a745', bgColor: '#d4edda' },
+                        'failed': { icon: 'exclamation-triangle', color: '#dc3545', bgColor: '#f8d7da' },
+                        'skipped': { icon: 'forward', color: '#6c757d', bgColor: '#e2e3e5' }
+                    }[step.status] || { icon: 'clock', color: '#ffc107', bgColor: '#fff3cd' };
+                    
+                    const cleanTitle = step.title ? step.title.replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '').trim() : 'Workflow Step';
+                    const duration = step.duration_ms ? ` (${step.duration_ms}ms)` : '';
+                    
+                    html += `
+                        <div style="display: flex; padding: 0.75rem; margin-bottom: 0.5rem; border-radius: 0.5rem; background-color: ${status.bgColor}; border-left: 4px solid ${status.color};">
+                            <div style="width: 40px; display: flex; align-items: center; justify-content: center;">
+                                <div style="width: 30px; height: 30px; border-radius: 50%; background-color: ${status.color}; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.8rem;">
+                                    ${stepNumber}
+                                </div>
+                            </div>
+                            <div style="flex: 1; margin-left: 0.75rem;">
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.25rem;">
+                                    <div>
+                                        <div style="font-weight: 600; color: #495057; font-size: 0.95rem;">
+                                            <i class="fas fa-${status.icon}" style="color: ${status.color}; margin-right: 0.5rem;"></i>
+                                            ${cleanTitle}
+                                        </div>
+                                        <div style="color: #6c757d; font-size: 0.85rem; margin-top: 0.25rem;">
+                                            Type: <code>${step.step_type}</code> | Status: <strong style="color: ${status.color};">${step.status.toUpperCase()}</strong>${duration}
+                                        </div>
+                                    </div>
+                                    <div style="font-size: 0.8rem; color: #868e96; text-align: right;">
+                                        ${new Date(step.timestamp).toLocaleTimeString()}
+                                        <br>
+                                        <small>${new Date(step.timestamp).toLocaleDateString()}</small>
+                                    </div>
+                                </div>
+                                ${step.description ? `
+                                    <div style="color: #495057; font-size: 0.9rem; margin-top: 0.5rem; padding: 0.5rem; background-color: rgba(255,255,255,0.7); border-radius: 0.25rem;">
+                                        ${step.description}
+                                    </div>
+                                ` : ''}
+                                ${step.details && Object.keys(step.details).length > 0 ? `
+                                    <div style="margin-top: 0.5rem;">
+                                        <details style="font-size: 0.85rem;">
+                                            <summary style="color: #007bff; cursor: pointer; font-weight: 500;">
+                                                <i class="fas fa-info-circle"></i> Additional Details
+                                            </summary>
+                                            <pre style="background-color: #f8f9fa; padding: 0.5rem; border-radius: 0.25rem; margin-top: 0.5rem; white-space: pre-wrap; color: #495057;">${JSON.stringify(step.details, null, 2)}</pre>
+                                        </details>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+
+                html += `
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        // Toggle function for workflow details
+        function toggleWorkflowDetails(collapseId) {
+            const chevron = document.getElementById(`chevron_${collapseId}`);
+            const collapseElement = document.getElementById(collapseId);
+            
+            if (collapseElement.classList.contains('show')) {
+                // Collapse
+                collapseElement.classList.remove('show');
+                collapseElement.classList.add('collapsing');
+                chevron.style.transform = 'rotate(0deg)';
+                
+                // After animation
+                setTimeout(() => {
+                    collapseElement.classList.remove('collapsing');
+                }, 350);
+            } else {
+                // Expand
+                collapseElement.classList.add('collapsing');
+                collapseElement.classList.add('show');
+                chevron.style.transform = 'rotate(180deg)';
+                
+                // After animation
+                setTimeout(() => {
+                    collapseElement.classList.remove('collapsing');
+                }, 350);
             }
         }
 

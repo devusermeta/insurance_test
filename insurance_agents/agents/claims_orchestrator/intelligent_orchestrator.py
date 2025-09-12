@@ -578,9 +578,29 @@ Deliver intelligent responses while maintaining consistent user experience."""
                 self.logger.info(f"🧵 Created isolated thread for claim processing: {request_thread.id}")
             else:
                 # Use persistent thread for chat conversations
+                # PRIORITY: If this session has active workflows, reuse the existing thread
+                existing_thread = None
+                
+                # Check if we have an existing thread for this session
                 if session_id in self.session_threads:
-                    request_thread = self.session_threads[session_id]
-                    self.logger.info(f"💬 Using existing chat thread: {request_thread.id}")
+                    existing_thread = self.session_threads[session_id]
+                    self.logger.info(f"💬 Found existing thread for session {session_id}: {existing_thread.id}")
+                
+                # If no exact session match, check if we have pending confirmations that might match
+                elif hasattr(self, 'pending_confirmations') and len(self.pending_confirmations) > 0:
+                    # Look for threads from pending confirmations (workflow continuity)
+                    for pending_session_id in self.pending_confirmations.keys():
+                        if pending_session_id in self.session_threads:
+                            existing_thread = self.session_threads[pending_session_id]
+                            # Update session mapping to maintain continuity
+                            self.session_threads[session_id] = existing_thread
+                            self.logger.info(f"💬 Reusing workflow thread from session {pending_session_id} for {session_id}: {existing_thread.id}")
+                            break
+                
+                # Use existing thread or create new one
+                if existing_thread:
+                    request_thread = existing_thread
+                    self.logger.info(f"♻️  Using existing persistent thread: {request_thread.id}")
                 else:
                     # Create new persistent thread for this session
                     request_thread = self.agents_client.threads.create()
@@ -2268,20 +2288,25 @@ Claim {claim_id} has been denied during intake verification.
         if not result:
             return True
             
-        # Check for error status
+        # Check for explicit error status
         status = result.get("status", "").lower()
         if status in ["error", "failed", "failure"]:
             return True
             
-        # Check for error messages
+        # Check for explicit error fields
+        if result.get("error"):
+            return True
+            
+        # Check for A2A success indicators - if these exist, consider it successful
+        if "content" in result or "success" in status or "completed" in status:
+            return False
+            
+        # Check for specific failure messages (more precise than before)
         message = result.get("message", "").lower()
-        if any(error_term in message for error_term in ["error", "failed", "failure", "could not", "unable to"]):
+        if any(error_term in message for error_term in ["could not", "unable to", "processing failed"]):
             return True
             
-        # Check for A2A error structure
-        if "error" in str(result).lower():
-            return True
-            
+        # If we can't determine clearly, assume success (be optimistic)
         return False
 
     async def _execute_sequential_a2a_workflow(self, claim_details: Dict[str, Any], session_id: str) -> Dict[str, Any]:

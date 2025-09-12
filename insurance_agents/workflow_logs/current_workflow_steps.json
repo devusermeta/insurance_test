@@ -73,5 +73,253 @@
         "decision": "denied"
       }
     }
+  ],
+  "session_1757676165940_ysiyj0vrm": [
+    {
+      "step_id": "bbdc4aa1-f486-43e6-8126-9fcb37317919",
+      "workflow_id": "workflow_session_1757676165940_ysiyj0vrm_1757676655",
+      "session_id": "session_1757676165940_ysiyj0vrm",
+      "claim_id": "IP-03",
+      "step_type": "initialization",
+      "title": "\ud83d\ude80 Workflow Initialization",
+      "description": "Starting claims processing workflow for IP-03",
+      "status": "completed",
+      "timestamp": "2025-09-12T17:00:55.359411",
+      "duration_ms": null,
+      "details": {
+        "session_id": "session_1757676165940_ysiyj0vrm",
+        "claim_id": "IP-03"
+      }
+    },
+    {
+      "step_id": "87c56f88-6158-4f79-802b-24ac3ea05df0",
+      "session_id": "session_1757676165940_ysiyj0vrm",
+      "step_type": "claim_extraction",
+      "title": "\ud83d\udcca Extracting Claim Details",
+      "description": "Retrieving comprehensive claim data for IP-03 from database",
+      "status": "in_progress",
+      "timestamp": "2025-09-12T17:00:55.360373",
+      "duration_ms": null,
+      "details": {
+        "claim_id": "IP-03",
+        "method": "Azure AI + MCP Tools"
+      }
+    }
+  ],
+  "97648cd0-b84c-459f-9d65-6b6d82352cf3": [
+    {
+      "step_id": "0abeb5a2-2320-4e0a-b6d1-81d88cf4854c",
+      "workflow_id": "workflow_97648cd0-b84c-459f-9d65-6b6d82352cf3_1757676681",
+      "session_id": "97648cd0-b84c-459f-9d65-6b6d82352cf3",
+      "claim_id": "IP-03",
+      "step_type": "initialization",
+      "title": "\ud83d\ude80 Workflow Initialization",
+      "description": "Starting claims processing workflow for IP-03",
+      "status": "completed",
+      "timestamp": "2025-09-12T17:01:21.866198",
+      "duration_ms": null,
+      "details": {
+        "session_id": "97648cd0-b84c-459f-9d65-6b6d82352cf3",
+        "claim_id": "IP-03"
+      }
+    },
+    {
+      "step_id": "9d24d575-5b29-4072-8dc5-6b185338a109",
+      "session_id": "97648cd0-b84c-459f-9d65-6b6d82352cf3",
+      "step_type": "claim_extraction",
+      "title": "\ud83d\udcca Extracting Claim Details",
+      "description": "Retrieving comprehensive claim data for IP-03 from database",
+      "status": "in_progress",
+      "timestamp": "2025-09-12T17:01:21.867340",
+      "duration_ms": null,
+      "details": {
+        "claim_id": "IP-03",
+        "method": "Azure AI + MCP Tools"
+      }
+    }
+  ],
+  "session_1757677120232_yhvmwc187": [
+    {
+      "step_id": "13af600d-2a5b-4b5a-bffb-ca7955ec04ff",
+      "workflow_id": "workflow_session_1757677120232_yhvmwc187_1757677141",
+      "session_id": "session_1757677120232_yhvmwc187",
+      "claim_id": "IP-02",
+      "step_type": "initialization",
+      "title": "\ud83d\ude80 Workflow Initialization",
+      "description": "Starting claims processing workflow for IP-02",
+      "status": "completed",
+      "timestamp": "2025-09-12T17:09:01.416636",
+      "duration_ms": null,
+      "details": {
+        "session_id": "session_1757677120232_yhvmwc187",
+        "claim_id": "IP-02"
+      }
+    },
+    {
+      "step_id": "26c583e3-f619-4ef3-862f-d13244dac2ed",
+      "session_id": "session_1757677120232_yhvmwc187",
+      "step_type": "claim_extraction",
+      "title": "\ud83d\udcca Extracting Claim Details",
+      "description": "Retrieving comprehensive claim data for IP-02 from database",
+      "status": "in_progress",
+      "timestamp": "2025-09-12T17:09:01.417651",
+      "duration_ms": null,
+      "details": {
+        "claim_id": "IP-02",
+        "method": "Azure AI + MCP Tools"
+      }
+    }
+  ],
+  "45131715-3424-43f8-8d5f-6349c6b063f7": [
+    {
+      "step_id": "dd5254c4-cf24-42a8-88e1-58ea53b5d29e",
+      "workflow_id": "workflow_45131715-3424-43f8-8d5f-6349c6b063f7_1757677163",
+      "session_id": "45131715-3424-43f8-8d5f-6349c6b063f7",
+      "claim_id": "IP-02",
+      "step_type": "initialization",
+      "title": "\ud83d\ude80 Workflow Initialization",
+      "description": "Starting claims processing workflow for IP-02",
+      "status": "completed",
+      "timestamp": "2025-09-12T17:09:23.295002",
+      "duration_ms": null,
+      "details": {
+        "session_id": "45131715-3424-43f8-8d5f-6349c6b063f7",
+        "claim_id": "IP-02"
+      }
+    },
+    {
+      "step_id": "c4d72f7b-fe86-441e-a742-73df18db35ab",
+      "session_id": "45131715-3424-43f8-8d5f-6349c6b063f7",
+      "step_type": "claim_extraction",
+      "title": "\ud83d\udcca Extracting Claim Details",
+      "description": "Retrieving comprehensive claim data for IP-02 from database",
+      "status": "in_progress",
+      "timestamp": "2025-09-12T17:09:23.297457",
+      "duration_ms": null,
+      "details": {
+        "claim_id": "IP-02",
+        "method": "Azure AI + MCP Tools"
+      }
+    },
+    {
+      "step_id": "7b6bddb4-c258-45ae-9abf-62a771a9f164",
+      "session_id": "45131715-3424-43f8-8d5f-6349c6b063f7",
+      "step_type": "user_confirmation",
+      "title": "\u2705 User Confirmation Received",
+      "description": "Employee confirmed to proceed with claim processing",
+      "status": "completed",
+      "timestamp": "2025-09-12T17:09:59.860649",
+      "duration_ms": null,
+      "details": {
+        "claim_id": "IP-02",
+        "user_response": "yes"
+      }
+    },
+    {
+      "step_id": "6f10dac3-5e61-443f-9642-83a347b16358",
+      "session_id": "45131715-3424-43f8-8d5f-6349c6b063f7",
+      "step_type": "coverage_evaluation",
+      "title": "\u2696\ufe0f Coverage Rules Evaluation",
+      "description": "Analyzing claim IP-02 against business rules and coverage limits",
+      "status": "in_progress",
+      "timestamp": "2025-09-12T17:10:00.457909",
+      "duration_ms": null,
+      "details": {
+        "claim_id": "IP-02",
+        "agent": "coverage_rules_engine"
+      }
+    }
+  ],
+  "session_1757679294032_w2wbtwkqe": [
+    {
+      "step_id": "b825fc68-02d5-45f8-8f62-84ca42da6746",
+      "workflow_id": "workflow_session_1757679294032_w2wbtwkqe_1757679320",
+      "session_id": "session_1757679294032_w2wbtwkqe",
+      "claim_id": "IP-01",
+      "step_type": "initialization",
+      "title": "\ud83d\ude80 Workflow Initialization",
+      "description": "Starting claims processing workflow for IP-01",
+      "status": "completed",
+      "timestamp": "2025-09-12T17:45:20.765862",
+      "duration_ms": null,
+      "details": {
+        "session_id": "session_1757679294032_w2wbtwkqe",
+        "claim_id": "IP-01"
+      }
+    },
+    {
+      "step_id": "9d62a77c-b74d-4c20-9637-c820f3afdd4e",
+      "session_id": "session_1757679294032_w2wbtwkqe",
+      "step_type": "claim_extraction",
+      "title": "\ud83d\udcca Extracting Claim Details",
+      "description": "Retrieving comprehensive claim data for IP-01 from database",
+      "status": "in_progress",
+      "timestamp": "2025-09-12T17:45:20.767981",
+      "duration_ms": null,
+      "details": {
+        "claim_id": "IP-01",
+        "method": "Azure AI + MCP Tools"
+      }
+    }
+  ],
+  "d3b21c51-81f7-4a43-ab16-711c923a7c79": [
+    {
+      "step_id": "89da16c4-9ccd-4219-897d-b89c04d890c6",
+      "workflow_id": "workflow_d3b21c51-81f7-4a43-ab16-711c923a7c79_1757679342",
+      "session_id": "d3b21c51-81f7-4a43-ab16-711c923a7c79",
+      "claim_id": "IP-01",
+      "step_type": "initialization",
+      "title": "\ud83d\ude80 Workflow Initialization",
+      "description": "Starting claims processing workflow for IP-01",
+      "status": "completed",
+      "timestamp": "2025-09-12T17:45:42.305170",
+      "duration_ms": null,
+      "details": {
+        "session_id": "d3b21c51-81f7-4a43-ab16-711c923a7c79",
+        "claim_id": "IP-01"
+      }
+    },
+    {
+      "step_id": "2fba6dbb-ce64-4a41-b587-ac5b90981a5e",
+      "session_id": "d3b21c51-81f7-4a43-ab16-711c923a7c79",
+      "step_type": "claim_extraction",
+      "title": "\ud83d\udcca Extracting Claim Details",
+      "description": "Retrieving comprehensive claim data for IP-01 from database",
+      "status": "in_progress",
+      "timestamp": "2025-09-12T17:45:42.308643",
+      "duration_ms": null,
+      "details": {
+        "claim_id": "IP-01",
+        "method": "Azure AI + MCP Tools"
+      }
+    },
+    {
+      "step_id": "091563ec-fa22-4265-b0c6-5fd3f0b3c945",
+      "session_id": "d3b21c51-81f7-4a43-ab16-711c923a7c79",
+      "step_type": "user_confirmation",
+      "title": "\u2705 User Confirmation Received",
+      "description": "Employee confirmed to proceed with claim processing",
+      "status": "completed",
+      "timestamp": "2025-09-12T17:46:34.031940",
+      "duration_ms": null,
+      "details": {
+        "claim_id": "IP-01",
+        "user_response": "yes"
+      }
+    },
+    {
+      "step_id": "1ad98a31-6c8c-4283-a986-c24dbce1014c",
+      "session_id": "d3b21c51-81f7-4a43-ab16-711c923a7c79",
+      "step_type": "coverage_evaluation",
+      "title": "\u2696\ufe0f Coverage Rules Evaluation",
+      "description": "Analyzing claim IP-01 against business rules and coverage limits",
+      "status": "in_progress",
+      "timestamp": "2025-09-12T17:46:34.611998",
+      "duration_ms": null,
+      "details": {
+        "claim_id": "IP-01",
+        "agent": "coverage_rules_engine"
+      }
+    }
   ]
 }

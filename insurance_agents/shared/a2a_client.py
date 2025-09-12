@@ -21,7 +21,11 @@ class A2AClient:
     def __init__(self, source_agent: str):
         self.source_agent = source_agent
         self.logger = logging.getLogger(f"A2AClient.{source_agent}")
-        self.client = httpx.AsyncClient(timeout=30.0)
+        # Increased timeout for all operations to handle longer processing
+        self.default_timeout = 120.0  # 2 minutes for all agents
+        # Extended timeout for document processing operations
+        self.document_timeout = 180.0  # 3 minutes for document processing
+        self.client = httpx.AsyncClient(timeout=self.default_timeout)
     
     def _get_agent_url(self, agent_name: str) -> str:
         """Get the URL for a specific agent"""
@@ -79,12 +83,17 @@ class A2AClient:
             
             self.logger.info(f"🔗 Making A2A POST request to: {agent_url}")
             
-            # Send request to target agent using correct A2A protocol
-            response = await self.client.post(
-                agent_url,  # No /execute suffix - use root endpoint
-                json=payload,
-                headers={"Content-Type": "application/json"}
-            )
+            # Use extended timeout for document processing operations
+            timeout = self.document_timeout if target_agent == "document_intelligence" else self.default_timeout
+            
+            # Create client with appropriate timeout for this request
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                # Send request to target agent using correct A2A protocol
+                response = await client.post(
+                    agent_url,  # No /execute suffix - use root endpoint
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                )
             
             if response.status_code == 200:
                 result = response.json()
