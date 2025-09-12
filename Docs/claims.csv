@@ -1,7 +1,0 @@
-claimId,memberId,category,submitDate,provider,dosFrom,dosTo,amountBilled,region,expectedOutput,status,createdBy
-OP-1001,M-001,Outpatient,2025-08-21,CLN-ALPHA,2025-08-20,2025-08-20,180.0,US,text confirmation then rules,submitted,customer
-OP-1002,M-002,Outpatient,2025-08-19,CLN-BETA,2025-08-18,2025-08-18,220.0,US,text confirmation then rules,submitted,customer
-OP-1003,M-003,Outpatient,2025-08-15,CLN-DENTAL,2025-08-14,2025-08-14,1200.0,US,text confirmation then rules,submitted,customer
-IP-2001,M-004,Inpatient,2025-08-10,HSP-GAMMA,2025-08-07,2025-08-10,14000.0,US,text confirmation then rules,submitted,customer
-IP-2002,M-005,Inpatient,2025-08-22,HSP-DELTA,2025-08-20,2025-08-22,8500.0,US,text confirmation then rules,submitted,customer
-IP-2003,M-006,Inpatient,2025-08-12,HSP-OMEGA,2025-08-11,2025-08-12,5000.0,US,text confirmation then rules,submitted,customer
