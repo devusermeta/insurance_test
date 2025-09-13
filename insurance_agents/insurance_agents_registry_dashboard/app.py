@@ -272,6 +272,10 @@ agent_cards: Dict[str, Dict] = {}  # Store agent cards for detailed info
 processing_logs: List[Dict] = []
 chat_sessions: Dict[str, List[Dict]] = {}  # Store chat history by session ID
 
+# Custom agents storage
+CUSTOM_AGENTS_FILE = Path(__file__).parent / "custom_agents.json"
+custom_agents: Dict[str, Dict] = {}  # Store user-added custom agents
+
 terminal_logger = TerminalLogger()
 
 # WebSocket connection management for real-time notifications
@@ -363,6 +367,9 @@ async def startup_event():
     """Initialize dashboard on startup"""
     terminal_logger.log("DASHBOARD", "STARTUP", "Insurance Claims Processing Dashboard starting...")
     
+    # Load custom agents from file
+    load_custom_agents()
+    
     # Initialize orchestrator if available
     if ORCHESTRATOR_AVAILABLE:
         terminal_logger.log("DASHBOARD", "STARTUP", "Initializing intelligent orchestrator...")
@@ -379,6 +386,97 @@ async def startup_event():
     await load_sample_claims()
     
     terminal_logger.log("SUCCESS", "DASHBOARD", "Dashboard initialized successfully on http://localhost:3000")
+
+def load_custom_agents():
+    """Load custom agents from the JSON file"""
+    global custom_agents
+    try:
+        if CUSTOM_AGENTS_FILE.exists():
+            with open(CUSTOM_AGENTS_FILE, 'r') as f:
+                custom_agents = json.load(f)
+            terminal_logger.log("SUCCESS", "STORAGE", f"Loaded {len(custom_agents)} custom agents")
+        else:
+            custom_agents = {}
+            terminal_logger.log("INFO", "STORAGE", "No custom agents file found, starting with empty registry")
+    except Exception as e:
+        terminal_logger.log("ERROR", "STORAGE", f"Failed to load custom agents: {e}")
+        custom_agents = {}
+
+def save_custom_agents():
+    """Save custom agents to the JSON file"""
+    try:
+        with open(CUSTOM_AGENTS_FILE, 'w') as f:
+            json.dump(custom_agents, f, indent=2)
+        terminal_logger.log("SUCCESS", "STORAGE", f"Saved {len(custom_agents)} custom agents")
+    except Exception as e:
+        terminal_logger.log("ERROR", "STORAGE", f"Failed to save custom agents: {e}")
+
+async def fetch_agent_card_from_url(agent_url: str) -> tuple[bool, Dict, str]:
+    """
+    Fetch agent card from URL and validate it
+    Returns: (success, agent_card_data, error_message)
+    """
+    try:
+        # Normalize URL (ensure it doesn't end with /)
+        agent_url = agent_url.rstrip('/')
+        
+        # Try to fetch agent card from .well-known/agent.json
+        agent_card_url = f"{agent_url}/.well-known/agent.json"
+        
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.get(agent_card_url) as response:
+                if response.status == 200:
+                    try:
+                        agent_card = await response.json()
+                        
+                        # Basic validation
+                        required_fields = ['name', 'description', 'version']
+                        missing_fields = [field for field in required_fields if field not in agent_card]
+                        
+                        if missing_fields:
+                            return False, {}, f"Agent card missing required fields: {', '.join(missing_fields)}"
+                        
+                        # Add the URL to the agent card
+                        agent_card['url'] = agent_url
+                        
+                        return True, agent_card, ""
+                        
+                    except json.JSONDecodeError as e:
+                        return False, {}, f"Invalid JSON in agent card: {e}"
+                else:
+                    return False, {}, f"Failed to fetch agent card: HTTP {response.status}"
+                    
+    except aiohttp.ClientError as e:
+        return False, {}, f"Network error: {e}"
+    except Exception as e:
+        return False, {}, f"Unexpected error: {e}"
+
+async def register_custom_agents():
+    """Register all custom agents from storage into the main registry"""
+    for agent_id, custom_agent in custom_agents.items():
+        agent_card = custom_agent.get("agent_card", {})
+        agent_name = agent_card.get("name", agent_id)
+        agent_url = custom_agent.get("url", "")
+        
+        # Register in main agents registry
+        registered_agents[agent_id] = AgentInfo(
+            agentId=agent_id,
+            name=agent_name,
+            type="custom",
+            status="unknown",  # Will be checked in background
+            capabilities=[], # Could extract from agent card skills if available
+            lastActivity=datetime.now().isoformat(),
+            currentClaims=[]
+        )
+        
+        # Store agent card for detailed view
+        agent_cards[agent_id] = agent_card
+        
+        # Check status
+        asyncio.create_task(check_and_update_custom_agent_status(agent_id))
+        
+        terminal_logger.log("CUSTOM_AGENT", "REGISTRATION", 
+            f"Registered custom agent: {agent_name} ({agent_url})")
 
 async def initialize_demo_agents():
     """Initialize and monitor real insurance agents"""
@@ -430,6 +528,9 @@ async def initialize_demo_agents():
         
         terminal_logger.log("AGENT", "REGISTRATION", 
             f"Agent {agent_config['name']} registered with status: {status}")
+    
+    # Also register custom agents from storage
+    await register_custom_agents()
 
 async def check_real_agent_health(agent_url: str, agent_id: str = None) -> str:
     """Check if a real agent is online and fetch its agent card"""
@@ -475,7 +576,7 @@ async def refresh_agent_status_periodically():
             
             # Update status for all registered agents
             for agent_id, agent_info in registered_agents.items():
-                # For our real agents, construct URL from agent_id
+                # For built-in agents, construct URL from agent_id
                 port_map = {
                     "claims_orchestrator": 8001,
                     "intake_clarifier": 8002, 
@@ -484,6 +585,7 @@ async def refresh_agent_status_periodically():
                 }
                 
                 if agent_id in port_map:
+                    # Built-in agent
                     agent_url = f"http://localhost:{port_map[agent_id]}"
                     new_status = await check_real_agent_health(agent_url, agent_id)
                     
@@ -496,6 +598,21 @@ async def refresh_agent_status_periodically():
                         # Log the status check even if no change
                         terminal_logger.log("DASHBOARD", "STATUS_CHECK", 
                             f"Agent {agent_info.name}: {new_status}")
+                
+                elif agent_id in custom_agents:
+                    # Custom agent
+                    agent_url = custom_agents[agent_id]["url"]
+                    new_status = await check_real_agent_health(agent_url, agent_id)
+                    
+                    if agent_info.status != new_status:
+                        terminal_logger.log("AGENT", "STATUS_CHANGE", 
+                            f"Custom Agent {agent_info.name}: {agent_info.status} -> {new_status}")
+                        agent_info.status = new_status
+                        agent_info.lastActivity = datetime.now().isoformat()
+                    else:
+                        # Log the status check even if no change
+                        terminal_logger.log("DASHBOARD", "STATUS_CHECK", 
+                            f"Custom Agent {agent_info.name}: {new_status}")
                         
         except Exception as e:
             terminal_logger.log("ERROR", "REFRESH", f"Error refreshing agent status: {e}")
@@ -684,9 +801,11 @@ async def refresh_claims():
 
 @app.get("/api/agents")
 async def get_agents():
-    """Get all registered agents"""
-    terminal_logger.log("INFO", "API", f"Retrieved {len(registered_agents)} agents")
-    return {"agents": list(registered_agents.values())}
+    """Get all registered agents (built-in + custom)"""
+    # The registered_agents dict already contains both built-in and custom agents
+    agents_list = list(registered_agents.values())
+    terminal_logger.log("INFO", "API", f"Retrieved {len(agents_list)} agents ({len(custom_agents)} custom)")
+    return {"agents": agents_list}
 
 @app.get("/api/agent-card/{agent_id}")
 async def get_agent_card(agent_id: str):
@@ -697,6 +816,155 @@ async def get_agent_card(agent_id: str):
     else:
         terminal_logger.log("WARNING", "API", f"Agent card not found for {agent_id}")
         return {"success": False, "error": "Agent card not found"}
+
+@app.post("/api/agents")
+async def add_custom_agent(request: Request):
+    """Add a custom agent by URL"""
+    try:
+        data = await request.json()
+        agent_url = data.get("url", "").strip()
+        
+        if not agent_url:
+            return {"success": False, "error": "Agent URL is required"}
+        
+        # Validate URL format
+        if not agent_url.startswith(("http://", "https://")):
+            return {"success": False, "error": "URL must start with http:// or https://"}
+        
+        # Normalize URL
+        agent_url = agent_url.rstrip('/')
+        
+        # Check if agent already exists (by URL)
+        for existing_id, existing_agent in custom_agents.items():
+            if existing_agent.get("url") == agent_url:
+                return {"success": False, "error": f"Agent already exists with ID: {existing_id}"}
+        
+        # Check if it conflicts with built-in agents
+        for existing_id, existing_agent in registered_agents.items():
+            # For built-in agents, we need to construct their URL
+            if existing_id in ["claims_orchestrator", "intake_clarifier", "document_intelligence", "coverage_rules_engine"]:
+                port_map = {
+                    "claims_orchestrator": 8001,
+                    "intake_clarifier": 8002,
+                    "document_intelligence": 8003,
+                    "coverage_rules_engine": 8004
+                }
+                built_in_url = f"http://localhost:{port_map[existing_id]}"
+                if agent_url == built_in_url:
+                    return {"success": False, "error": f"This URL belongs to the built-in agent: {existing_agent.name}"}
+        
+        # Fetch and validate agent card
+        success, agent_card, error_msg = await fetch_agent_card_from_url(agent_url)
+        
+        if not success:
+            return {"success": False, "error": f"Failed to fetch agent card: {error_msg}"}
+        
+        # Generate a unique agent ID based on name
+        agent_name = agent_card.get("name", "Unknown Agent")
+        agent_id = agent_name.lower().replace(" ", "_").replace("-", "_")
+        
+        # Ensure unique ID
+        counter = 1
+        original_id = agent_id
+        while agent_id in custom_agents or agent_id in registered_agents:
+            agent_id = f"{original_id}_{counter}"
+            counter += 1
+        
+        # Store the custom agent
+        custom_agents[agent_id] = {
+            "agentId": agent_id,
+            "url": agent_url,
+            "agent_card": agent_card,
+            "added_timestamp": datetime.now().isoformat(),
+            "type": "custom"
+        }
+        
+        # Also register it in the main agents registry
+        registered_agents[agent_id] = AgentInfo(
+            agentId=agent_id,
+            name=agent_name,
+            type="custom",
+            status="unknown",  # Will be checked in background
+            capabilities=[], # Will be populated from agent card
+            lastActivity=datetime.now().isoformat(),
+            currentClaims=[]
+        )
+        
+        # Store agent card for detailed view
+        agent_cards[agent_id] = agent_card
+        
+        # Save to file
+        save_custom_agents()
+        
+        # Check agent health in background
+        asyncio.create_task(check_and_update_custom_agent_status(agent_id))
+        
+        terminal_logger.log("SUCCESS", "CUSTOM_AGENT", f"Added custom agent: {agent_name} ({agent_url})")
+        
+        return {
+            "success": True,
+            "message": f"Successfully added agent: {agent_name}",
+            "agentId": agent_id,
+            "agentName": agent_name
+        }
+        
+    except Exception as e:
+        terminal_logger.log("ERROR", "CUSTOM_AGENT", f"Failed to add custom agent: {e}")
+        return {"success": False, "error": f"Internal error: {str(e)}"}
+
+@app.delete("/api/agents/{agent_id}")
+async def remove_custom_agent(agent_id: str):
+    """Remove a custom agent"""
+    try:
+        # Check if it's a built-in agent (protect them)
+        built_in_agents = ["claims_orchestrator", "intake_clarifier", "document_intelligence", "coverage_rules_engine"]
+        if agent_id in built_in_agents:
+            return {"success": False, "error": "Cannot remove built-in agents"}
+        
+        # Check if agent exists in custom agents
+        if agent_id not in custom_agents:
+            return {"success": False, "error": "Custom agent not found"}
+        
+        # Get agent name for logging
+        agent_info = custom_agents[agent_id]
+        agent_name = agent_info.get("agent_card", {}).get("name", agent_id)
+        
+        # Remove from all registries
+        del custom_agents[agent_id]
+        
+        if agent_id in registered_agents:
+            del registered_agents[agent_id]
+        
+        if agent_id in agent_cards:
+            del agent_cards[agent_id]
+        
+        # Save to file
+        save_custom_agents()
+        
+        terminal_logger.log("SUCCESS", "CUSTOM_AGENT", f"Removed custom agent: {agent_name}")
+        
+        return {
+            "success": True,
+            "message": f"Successfully removed agent: {agent_name}"
+        }
+        
+    except Exception as e:
+        terminal_logger.log("ERROR", "CUSTOM_AGENT", f"Failed to remove custom agent: {e}")
+        return {"success": False, "error": f"Internal error: {str(e)}"}
+
+async def check_and_update_custom_agent_status(agent_id: str):
+    """Check and update status for a custom agent"""
+    if agent_id not in custom_agents:
+        return
+    
+    agent_url = custom_agents[agent_id]["url"]
+    status = await check_real_agent_health(agent_url, agent_id)
+    
+    if agent_id in registered_agents:
+        registered_agents[agent_id].status = status
+        registered_agents[agent_id].lastActivity = datetime.now().isoformat()
+        
+        terminal_logger.log("INFO", "CUSTOM_AGENT", f"Updated status for {agent_id}: {status}")
 
 @app.post("/api/email-notification")
 async def receive_email_notification(request: Request):
