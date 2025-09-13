@@ -192,7 +192,7 @@ def get_agent_card(host: str, port: int):
     )
 
     skill_ai_routing = AgentSkill(
-        id='ai_powered_routing',
+        id='asst_xvp1TYOJ3EGSyClPD8mDkn2k',
         name='AI-Powered Intelligent Routing',
         description=(
             'Uses Azure AI Foundry to analyze requests and dynamically determine '
@@ -218,6 +218,7 @@ def get_agent_card(host: str, port: int):
         ),
         url=f'http://{host}:{port}/',
         version='1.0.0',
+        id = 'asst_xvp1TYOJ3EGSyClPD8mDkn2k',
         defaultInputModes=['text'],
         defaultOutputModes=['text'],
         capabilities=capabilities,
