@@ -1618,6 +1618,8 @@
                     if (data.success) {
                         agentCard = data.agentCard;
                         hasAgentCard = true;
+                        // Debug: Log agent card to console
+                        console.log('Agent card data:', agentCard);
                     }
                 }
 
@@ -1667,6 +1669,25 @@
                             <div class="detail-grid">
                                 <span class="detail-label">Description:</span>
                                 <span class="detail-value">${agentCard.description || 'N/A'}</span>
+                                ${(() => {
+                                    // Look for Azure AI assistant ID in the agent card
+                                    let azureId = agentCard.id;
+                                    
+                                    // If not found at top level, look in skills for Azure assistant ID
+                                    if (!azureId && agentCard.skills) {
+                                        const azureSkill = agentCard.skills.find(skill => 
+                                            skill.id && skill.id.startsWith('asst_')
+                                        );
+                                        if (azureSkill) {
+                                            azureId = azureSkill.id;
+                                        }
+                                    }
+                                    
+                                    return azureId ? `
+                                        <span class="detail-label">Azure AI Assistant ID:</span>
+                                        <span class="detail-value"><code>${azureId}</code></span>
+                                    ` : '';
+                                })()}
                                 <span class="detail-label">Version:</span>
                                 <span class="detail-value">${agentCard.version || 'N/A'}</span>
                                 <span class="detail-label">Input Modes:</span>
