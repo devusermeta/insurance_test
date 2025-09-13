@@ -277,7 +277,7 @@ class IntelligentClaimsOrchestrator(AgentExecutor):
             return None
         
     async def initialize(self):
-        """Initialize the orchestrator by discovering available agents"""
+        """Initialize the orchestrator by discovering available agents and starting background discovery"""
         try:
             self.logger.info("🔍 Discovering available agents...")
             discovered_agents = await self.agent_discovery.discover_all_agents()  # Fixed method name
@@ -291,6 +291,10 @@ class IntelligentClaimsOrchestrator(AgentExecutor):
                     self.agent_capabilities[agent_name] = capabilities
             
             self.logger.info(f"✅ Discovered {len(self.available_agents)} agents: {list(self.available_agents.keys())}")
+            
+            # Start background discovery for dynamic agent detection
+            self.logger.info("🔄 Starting background agent discovery polling...")
+            self.agent_discovery.start_background_discovery()
             
         except Exception as e:
             self.logger.error(f"❌ Error discovering agents: {e}")
@@ -1847,20 +1851,70 @@ Document Requirements:
                 # Check the type of denial to determine if we should update status
                 if "already approved" in specific_reason.lower() or "already processed" in specific_reason.lower():
                     self.logger.info(f"⏹️ Pre-validation failure - no status update needed: {specific_reason}")
+                    
+                    # STEP 6: Send email notification for DENIED claim (pre-validation failure)
+                    self.logger.info(f"📧 STEP 6: Sending email notification for DENIED claim {claim_id} (pre-validation failure)")
+                    email_result = await self._send_email_notification({
+                        "claim_id": claim_id,
+                        "final_decision": "DENIED",
+                        "patient_name": claim_details.get('patient_name', 'N/A'),
+                        "bill_amount": claim_details.get('bill_amount', 'N/A'),
+                        "category": claim_details.get('category', 'N/A'),
+                        "service_description": claim_details.get('service_description', 'N/A'),
+                        "provider": claim_details.get('provider', 'N/A'),
+                        "message": f"Claim denied due to pre-validation failure: {specific_reason}",
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    
+                    # Add email status to the response message
+                    email_status_msg = ""
+                    if email_result.get("email_status") == "sent":
+                        email_status_msg = "\n📧 **Email notification sent successfully**"
+                    elif email_result.get("email_status") == "failed":
+                        email_status_msg = f"\n⚠️ **Email notification failed:** {email_result.get('error', 'Unknown error')}"
+                    elif email_result.get("email_status") == "skipped":
+                        email_status_msg = "\n💡 **Email notification skipped** (Communication Agent not available)"
+                    
                     return {
                         "status": "denied_pre_validation", 
-                        "message": f"❌ **CLAIM DENIED**\n\nClaim {claim_id} processing stopped.\n\nReason: {specific_reason}",
+                        "message": f"❌ **CLAIM DENIED**\n\nClaim {claim_id} processing stopped.\n\nReason: {specific_reason}\n✅ Email Notification: {email_result.get('email_status', 'unknown').title()}{email_status_msg}",
                         "claim_id": claim_id,
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": datetime.now().isoformat(),
+                        "email_result": email_result
                     }
                 else:
                     # Traditional validation failure - Coverage Rules Engine already updated status
                     self.logger.info(f"❌ Traditional validation failure - status already updated: {specific_reason}")
+                    
+                    # STEP 6: Send email notification for DENIED claim (traditional failure)
+                    self.logger.info(f"📧 STEP 6: Sending email notification for DENIED claim {claim_id} (traditional failure)")
+                    email_result = await self._send_email_notification({
+                        "claim_id": claim_id,
+                        "final_decision": "DENIED",
+                        "patient_name": claim_details.get('patient_name', 'N/A'),
+                        "bill_amount": claim_details.get('bill_amount', 'N/A'),
+                        "category": claim_details.get('category', 'N/A'),
+                        "service_description": claim_details.get('service_description', 'N/A'),
+                        "provider": claim_details.get('provider', 'N/A'),
+                        "message": f"Claim denied by Coverage Rules Engine: {specific_reason}",
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    
+                    # Add email status to the response message
+                    email_status_msg = ""
+                    if email_result.get("email_status") == "sent":
+                        email_status_msg = "\n📧 **Email notification sent successfully**"
+                    elif email_result.get("email_status") == "failed":
+                        email_status_msg = f"\n⚠️ **Email notification failed:** {email_result.get('error', 'Unknown error')}"
+                    elif email_result.get("email_status") == "skipped":
+                        email_status_msg = "\n💡 **Email notification skipped** (Communication Agent not available)"
+                    
                     return {
                         "status": "denied",
-                        "message": f"❌ **CLAIM DENIED**\n\nClaim {claim_id} has been denied by Coverage Rules Engine.\n\nReason: {specific_reason}",
+                        "message": f"❌ **CLAIM DENIED**\n\nClaim {claim_id} has been denied by Coverage Rules Engine.\n\nReason: {specific_reason}\n✅ Email Notification: {email_result.get('email_status', 'unknown').title()}{email_status_msg}",
                         "claim_id": claim_id,
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": datetime.now().isoformat(),
+                        "email_result": email_result
                     }
             
             # STEP 3: Document Intelligence - Extract patient data
@@ -2019,10 +2073,13 @@ If match: Update status to 'marked for approval'"""
             self.logger.info(f"✅ Intake Clarifier completed successfully for {claim_id}")
             
             # Determine final result
+            final_result = {}
             if self._is_claim_approved(intake_result):
-                return {
+                final_result = {
                     "status": "approved",
-                    "message": f"""🎉 **CLAIM APPROVED**
+                    "final_decision": "APPROVED",
+                    "message": "Claim has been approved after successful validation through all processing steps",
+                    "result_message": f"""🎉 **CLAIM APPROVED**
 
 Claim {claim_id} has been processed successfully!
 
@@ -2035,12 +2092,19 @@ Claim {claim_id} has been processed successfully!
 **Patient:** {claim_details['patient_name']}
 **Amount:** ${claim_details['bill_amount']}""",
                     "claim_id": claim_id,
+                    "patient_name": claim_details['patient_name'],
+                    "bill_amount": claim_details['bill_amount'],
+                    "category": claim_details.get('category', 'N/A'),
+                    "service_description": claim_details.get('service_description', 'N/A'),
+                    "provider": claim_details.get('provider', 'N/A'),
                     "timestamp": datetime.now().isoformat()
                 }
             else:
-                return {
+                final_result = {
                     "status": "denied",
-                    "message": f"""❌ **CLAIM DENIED**
+                    "final_decision": "DENIED",
+                    "message": intake_result.get('message', 'Data verification failed'),
+                    "result_message": f"""❌ **CLAIM DENIED**
 
 Claim {claim_id} has been denied during intake verification.
 
@@ -2048,8 +2112,40 @@ Claim {claim_id} has been denied during intake verification.
 
 **Status:** Marked for rejection in Cosmos DB""",
                     "claim_id": claim_id,
+                    "patient_name": claim_details['patient_name'],
+                    "bill_amount": claim_details['bill_amount'],
+                    "category": claim_details.get('category', 'N/A'),
+                    "service_description": claim_details.get('service_description', 'N/A'),
+                    "provider": claim_details.get('provider', 'N/A'),
                     "timestamp": datetime.now().isoformat()
                 }
+
+            # STEP 6: Send email notification for ANY claim result (approved or denied)
+            self.logger.info(f"📧 STEP 6: Sending email notification for {final_result['final_decision']} claim {claim_id}")
+            email_result = await self._send_email_notification(final_result)
+            
+            # Add email status to the response message
+            email_status_msg = ""
+            if email_result.get("email_status") == "sent":
+                email_status_msg = "\n📧 **Email notification sent successfully**"
+            elif email_result.get("email_status") == "failed":
+                email_status_msg = f"\n⚠️ **Email notification failed:** {email_result.get('error', 'Unknown error')}"
+            elif email_result.get("email_status") == "skipped":
+                email_status_msg = "\n💡 **Email notification skipped** (Communication Agent not available)"
+            
+            # Add email step to the processing steps
+            final_result["result_message"] = final_result["result_message"].replace(
+                "**Status:**", 
+                f"✅ Email Notification: {email_result.get('email_status', 'unknown').title()}{email_status_msg}\n\n**Status:**"
+            )
+            
+            return {
+                "status": final_result["status"],
+                "message": final_result["result_message"],
+                "claim_id": claim_id,
+                "timestamp": final_result["timestamp"],
+                "email_result": email_result
+            }
                 
         except Exception as e:
             self.logger.error(f"❌ Error in your workflow: {e}")
@@ -2550,20 +2646,25 @@ Claim {claim_id} has been denied during intake verification.
     async def _send_email_notification(self, final_result: Dict[str, Any]) -> Dict[str, Any]:
         """
         Send email notification through Communication Agent (if available)
+        Uses on-demand discovery to check if Communication Agent is online
         This is an optional step - workflow continues even if email fails
         """
         try:
             self.logger.info("📧 STEP 6: Checking for Communication Agent to send email notification...")
             
-            # Check if communication agent is available
-            discovered_agents = await self.agent_discovery.discover_all_agents()
-            if "communication_agent" not in discovered_agents:
+            # ON-DEMAND DISCOVERY: Check if communication agent is available right now
+            self.logger.info("🔍 ON-DEMAND: Checking Communication Agent availability...")
+            communication_agent = await self.agent_discovery.discover_specific_agent("communication_agent")
+            
+            if not communication_agent:
                 self.logger.info("📧 Communication Agent not available - skipping email notification")
                 return {
                     "email_status": "skipped",
                     "reason": "Communication Agent not online",
                     "workflow_continues": True
                 }
+            
+            self.logger.info("✅ Communication Agent is online - proceeding with email notification")
             
             # Prepare email data from final result
             email_data = {
@@ -2573,13 +2674,15 @@ Claim {claim_id} has been denied during intake verification.
                 "reason": final_result.get("message", "No details provided"),
                 "timestamp": final_result.get("timestamp", datetime.now().isoformat()),
                 "patient_name": final_result.get("patient_name", "N/A"),
-                "category": final_result.get("category", "N/A")
+                "category": final_result.get("category", "N/A"),
+                "service_description": final_result.get("service_description", "N/A"),
+                "provider": final_result.get("provider", "N/A")
             }
             
             # Send email through Communication Agent
             self.logger.info(f"📧 Sending email notification for claim {email_data['claim_id']}")
             
-            agent_url = "http://localhost:8005"
+            agent_url = communication_agent["base_url"]
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     f"{agent_url}/process",

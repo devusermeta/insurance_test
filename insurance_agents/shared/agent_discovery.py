@@ -1,12 +1,13 @@
 """
 Enhanced Agent Discovery Module
 Adds detailed agent discovery, capability matching, and routing decisions
+Includes dynamic discovery with background polling and on-demand checking
 """
 
 import asyncio
 import logging
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import aiohttp
 import json
 
@@ -14,52 +15,143 @@ import json
 class AgentDiscoveryService:
     """
     Enhanced agent discovery with detailed logging and intelligent routing
+    Supports both background polling and on-demand discovery
     """
     
     def __init__(self, logger: logging.Logger):
         self.logger = logger
         self.discovered_agents = {}
         self.last_discovery = None
+        self._background_task = None
+        self._is_running = False
         
-        # Known agent endpoints
-        self.agent_endpoints = {
+        # Known agent endpoints (communication_agent hidden by default)
+        self.default_agent_endpoints = {
+            "intake_clarifier": "http://localhost:8002",
+            "document_intelligence": "http://localhost:8003", 
+            "coverage_rules_engine": "http://localhost:8004"
+        }
+        
+        # All possible agents (including communication_agent)
+        self.all_agent_endpoints = {
             "intake_clarifier": "http://localhost:8002",
             "document_intelligence": "http://localhost:8003", 
             "coverage_rules_engine": "http://localhost:8004",
             "communication_agent": "http://localhost:8005"
         }
+        
+        # Currently active endpoints (can be modified via UI)
+        self.active_agent_endpoints = self.default_agent_endpoints.copy()
     
-    async def discover_all_agents(self) -> Dict[str, Any]:
+    def start_background_discovery(self, interval_minutes: int = 2):
+        """Start background agent discovery polling"""
+        if not self._is_running:
+            self._is_running = True
+            self._background_task = asyncio.create_task(self._background_discovery_loop(interval_minutes))
+            self.logger.info(f"🔄 Started background agent discovery (every {interval_minutes} minutes)")
+    
+    def stop_background_discovery(self):
+        """Stop background agent discovery polling"""
+        self._is_running = False
+        if self._background_task:
+            self._background_task.cancel()
+            self.logger.info("🛑 Stopped background agent discovery")
+    
+    async def _background_discovery_loop(self, interval_minutes: int):
+        """Background discovery loop that runs every X minutes"""
+        while self._is_running:
+            try:
+                await asyncio.sleep(interval_minutes * 60)  # Convert to seconds
+                if self._is_running:
+                    self.logger.info("🔄 Background agent discovery check...")
+                    await self.discover_all_agents(silent=True)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"❌ Background discovery error: {e}")
+    
+    async def discover_specific_agent(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        """
+        On-demand discovery for a specific agent (e.g., communication_agent before email step)
+        """
+        if agent_id not in self.all_agent_endpoints:
+            self.logger.warning(f"⚠️ Unknown agent ID: {agent_id}")
+            return None
+        
+        base_url = self.all_agent_endpoints[agent_id]
+        self.logger.info(f"🔍 ON-DEMAND DISCOVERY: Checking {agent_id} at {base_url}")
+        
+        try:
+            agent_info = await self._discover_single_agent(agent_id, base_url)
+            if agent_info:
+                # Update the discovered agents cache
+                self.discovered_agents[agent_id] = agent_info
+                self.logger.info(f"✅ {agent_id}: NOW ONLINE with {len(agent_info.get('skills', []))} skills")
+                return agent_info
+            else:
+                self.logger.info(f"❌ {agent_id}: Still offline")
+                # Remove from cache if it was there
+                self.discovered_agents.pop(agent_id, None)
+                return None
+        except Exception as e:
+            self.logger.error(f"❌ On-demand discovery failed for {agent_id}: {e}")
+            return None
+    
+    def add_agent_to_registry(self, agent_id: str):
+        """Add an agent to the active registry (e.g., via UI)"""
+        if agent_id in self.all_agent_endpoints:
+            self.active_agent_endpoints[agent_id] = self.all_agent_endpoints[agent_id]
+            self.logger.info(f"➕ Added {agent_id} to active agent registry")
+        else:
+            self.logger.warning(f"⚠️ Cannot add unknown agent: {agent_id}")
+    
+    def remove_agent_from_registry(self, agent_id: str):
+        """Remove an agent from the active registry"""
+        if agent_id in self.active_agent_endpoints:
+            del self.active_agent_endpoints[agent_id]
+            self.discovered_agents.pop(agent_id, None)
+            self.logger.info(f"➖ Removed {agent_id} from active agent registry")
+    
+    async def discover_all_agents(self, silent: bool = False) -> Dict[str, Any]:
         """
         Discover all available agents and their capabilities
+        Uses active_agent_endpoints (not communication_agent by default)
         """
-        self.logger.info("🔍 AGENT DISCOVERY: Starting agent discovery process...")
+        if not silent:
+            self.logger.info("🔍 AGENT DISCOVERY: Starting agent discovery process...")
         
         discovered = {}
         
-        for agent_id, base_url in self.agent_endpoints.items():
-            self.logger.info(f"   🤖 Discovering {agent_id} at {base_url}")
+        for agent_id, base_url in self.active_agent_endpoints.items():
+            if not silent:
+                self.logger.info(f"   🤖 Discovering {agent_id} at {base_url}")
             
             try:
                 agent_info = await self._discover_single_agent(agent_id, base_url)
                 if agent_info:
                     discovered[agent_id] = agent_info
-                    self.logger.info(f"   ✅ {agent_id}: ONLINE with {len(agent_info.get('skills', []))} skills")
-                    
-                    # Log capabilities
-                    for skill in agent_info.get('skills', []):
-                        skill_name = skill.get('name', 'Unknown')
-                        self.logger.info(f"      • Skill: {skill_name}")
+                    if not silent:
+                        self.logger.info(f"   ✅ {agent_id}: ONLINE with {len(agent_info.get('skills', []))} skills")
+                        
+                        # Log capabilities
+                        for skill in agent_info.get('skills', []):
+                            skill_name = skill.get('name', 'Unknown')
+                            self.logger.info(f"      • Skill: {skill_name}")
                 else:
-                    self.logger.warning(f"   ❌ {agent_id}: OFFLINE or no agent card")
+                    if not silent:
+                        self.logger.warning(f"   ❌ {agent_id}: OFFLINE or no agent card")
+                    # Remove from discovered agents if it went offline
+                    self.discovered_agents.pop(agent_id, None)
                     
             except Exception as e:
-                self.logger.error(f"   ❌ {agent_id}: Discovery failed - {str(e)}")
+                if not silent:
+                    self.logger.error(f"   ❌ {agent_id}: Discovery failed - {str(e)}")
         
         self.discovered_agents = discovered
         self.last_discovery = datetime.now()
         
-        self.logger.info(f"🎯 DISCOVERY COMPLETE: Found {len(discovered)} agents online")
+        if not silent:
+            self.logger.info(f"🎯 DISCOVERY COMPLETE: Found {len(discovered)} agents online")
         
         return discovered
     
