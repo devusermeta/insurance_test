@@ -25,7 +25,8 @@ class AgentDiscoveryService:
         self.agent_endpoints = {
             "intake_clarifier": "http://localhost:8002",
             "document_intelligence": "http://localhost:8003", 
-            "coverage_rules_engine": "http://localhost:8004"
+            "coverage_rules_engine": "http://localhost:8004",
+            "communication_agent": "http://localhost:8005"
         }
     
     async def discover_all_agents(self) -> Dict[str, Any]:

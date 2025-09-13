@@ -274,6 +274,90 @@ chat_sessions: Dict[str, List[Dict]] = {}  # Store chat history by session ID
 
 terminal_logger = TerminalLogger()
 
+# WebSocket connection management for real-time notifications
+websocket_connections: List[WebSocket] = []
+
+class NotificationManager:
+    """Manages real-time notifications to connected clients"""
+    
+    @staticmethod
+    async def send_notification(notification_type: str, data: Dict[str, Any]):
+        """Send notification to all connected clients"""
+        if not websocket_connections:
+            return
+        
+        notification = {
+            "type": notification_type,
+            "data": data,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        terminal_logger.log("NOTIFICATION", "SEND", f"📢 Sending {notification_type} notification to {len(websocket_connections)} clients")
+        
+        # Send to all connected clients
+        disconnected = []
+        for websocket in websocket_connections:
+            try:
+                await websocket.send_json(notification)
+            except Exception as e:
+                terminal_logger.log("WARNING", "WEBSOCKET", f"Failed to send notification: {e}")
+                disconnected.append(websocket)
+        
+        # Remove disconnected clients
+        for ws in disconnected:
+            websocket_connections.remove(ws)
+    
+    @staticmethod
+    async def send_email_notification(claim_id: str, email_status: str, details: Dict[str, Any]):
+        """Send email-specific notification"""
+        await NotificationManager.send_notification("email_notification", {
+            "claim_id": claim_id,
+            "email_status": email_status,
+            "details": details,
+            "message": f"Email notification {email_status} for claim {claim_id}"
+        })
+
+notification_manager = NotificationManager()
+
+@app.websocket("/ws/notifications")
+async def websocket_notifications(websocket: WebSocket):
+    """WebSocket endpoint for real-time notifications"""
+    await websocket.accept()
+    websocket_connections.append(websocket)
+    
+    terminal_logger.log("WEBSOCKET", "CONNECT", f"📡 Client connected. Total connections: {len(websocket_connections)}")
+    
+    try:
+        # Send welcome message
+        await websocket.send_json({
+            "type": "connection_established",
+            "data": {"message": "Connected to notification system"},
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # Keep connection alive
+        while True:
+            # Wait for any messages from client (heartbeat, etc.)
+            try:
+                data = await websocket.receive_json()
+                # Handle client messages if needed
+                if data.get("type") == "heartbeat":
+                    await websocket.send_json({
+                        "type": "heartbeat_response",
+                        "timestamp": datetime.now().isoformat()
+                    })
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                terminal_logger.log("WARNING", "WEBSOCKET", f"WebSocket error: {e}")
+                break
+                
+    except WebSocketDisconnect:
+        pass
+    finally:
+        websocket_connections.remove(websocket)
+        terminal_logger.log("WEBSOCKET", "DISCONNECT", f"📡 Client disconnected. Total connections: {len(websocket_connections)}")
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize dashboard on startup"""
@@ -613,6 +697,42 @@ async def get_agent_card(agent_id: str):
     else:
         terminal_logger.log("WARNING", "API", f"Agent card not found for {agent_id}")
         return {"success": False, "error": "Agent card not found"}
+
+@app.post("/api/email-notification")
+async def receive_email_notification(request: Request):
+    """Receive email notification from Communication Agent and broadcast to frontend"""
+    try:
+        data = await request.json()
+        
+        claim_id = data.get("claim_id", "Unknown")
+        email_status = data.get("email_status", "unknown")
+        details = data.get("details", {})
+        
+        terminal_logger.log("EMAIL", "NOTIFICATION", f"📧 Email notification received: {email_status} for claim {claim_id}")
+        
+        # Send real-time notification to all connected clients
+        await notification_manager.send_email_notification(claim_id, email_status, details)
+        
+        # Log the notification
+        notification_log = {
+            "timestamp": datetime.now().isoformat(),
+            "claim_id": claim_id,
+            "email_status": email_status,
+            "details": details
+        }
+        
+        return {
+            "success": True,
+            "message": f"Email notification processed for claim {claim_id}",
+            "notification": notification_log
+        }
+        
+    except Exception as e:
+        terminal_logger.log("ERROR", "EMAIL", f"Failed to process email notification: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 @app.post("/api/claims/{claim_id}/process")
 async def process_claim(claim_id: str, request: ProcessingRequest, background_tasks: BackgroundTasks):

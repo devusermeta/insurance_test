@@ -79,7 +79,8 @@ A2A_AGENT_PORTS = {
     "claims_orchestrator": 8001,
     "intake_clarifier": 8002, 
     "document_intelligence": 8003,
-    "coverage_rules_engine": 8004
+    "coverage_rules_engine": 8004,
+    "communication_agent": 8005
 }
 
 # Shared logging configuration

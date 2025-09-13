@@ -2509,7 +2509,8 @@ Claim {claim_id} has been denied during intake verification.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✅ **WORKFLOW COMPLETE** - Employee can proceed with next actions."""
 
-            return {
+            # Prepare final result
+            final_result = {
                 "status": "workflow_complete",
                 "final_decision": final_decision,
                 "message": decision_message,
@@ -2523,6 +2524,20 @@ Claim {claim_id} has been denied during intake verification.
                 "successful_steps": successful_steps
             }
             
+            # STEP 6: Send email notification (optional)
+            email_result = await self._send_email_notification(final_result)
+            final_result["email_notification"] = email_result
+            
+            # Update message with email status
+            if email_result["email_status"] == "sent":
+                final_result["message"] += "\n\n📧 ✅ **Email notification sent successfully**"
+            elif email_result["email_status"] == "failed":
+                final_result["message"] += f"\n\n📧 ❌ **Email notification failed**: {email_result.get('error', 'Unknown error')}"
+            elif email_result["email_status"] == "skipped":
+                final_result["message"] += "\n\n📧 ℹ️ **Email notification skipped** (Communication Agent offline)"
+
+            return final_result
+            
         except Exception as e:
             self.logger.error(f"❌ STEP 5 Error finalizing workflow decision: {e}")
             return {
@@ -2530,6 +2545,82 @@ Claim {claim_id} has been denied during intake verification.
                 "error_type": "decision_finalization_failed",
                 "message": f"❌ Decision Finalization Failed: {str(e)}",
                 "timestamp": datetime.now().isoformat()
+            }
+
+    async def _send_email_notification(self, final_result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Send email notification through Communication Agent (if available)
+        This is an optional step - workflow continues even if email fails
+        """
+        try:
+            self.logger.info("📧 STEP 6: Checking for Communication Agent to send email notification...")
+            
+            # Check if communication agent is available
+            discovered_agents = await self.agent_discovery.discover_all_agents()
+            if "communication_agent" not in discovered_agents:
+                self.logger.info("📧 Communication Agent not available - skipping email notification")
+                return {
+                    "email_status": "skipped",
+                    "reason": "Communication Agent not online",
+                    "workflow_continues": True
+                }
+            
+            # Prepare email data from final result
+            email_data = {
+                "claim_id": final_result.get("claim_id", "N/A"),
+                "status": final_result.get("final_decision", "Unknown"),
+                "amount": f"${final_result.get('bill_amount', 'N/A')}",
+                "reason": final_result.get("message", "No details provided"),
+                "timestamp": final_result.get("timestamp", datetime.now().isoformat()),
+                "patient_name": final_result.get("patient_name", "N/A"),
+                "category": final_result.get("category", "N/A")
+            }
+            
+            # Send email through Communication Agent
+            self.logger.info(f"📧 Sending email notification for claim {email_data['claim_id']}")
+            
+            agent_url = "http://localhost:8005"
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{agent_url}/process",
+                    json={
+                        "action": "send_claim_notification",
+                        "data": email_data
+                    }
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get("success"):
+                        self.logger.info("📧 ✅ Email notification sent successfully")
+                        return {
+                            "email_status": "sent",
+                            "message": "Email notification sent successfully",
+                            "email_details": result,
+                            "workflow_continues": True
+                        }
+                    else:
+                        error_msg = result.get("error", "Unknown email error")
+                        self.logger.warning(f"📧 ❌ Email sending failed: {error_msg}")
+                        return {
+                            "email_status": "failed",
+                            "error": error_msg,
+                            "workflow_continues": True
+                        }
+                else:
+                    self.logger.warning(f"📧 ❌ Communication Agent returned status {response.status_code}")
+                    return {
+                        "email_status": "failed",
+                        "error": f"Communication Agent returned status {response.status_code}",
+                        "workflow_continues": True
+                    }
+                    
+        except Exception as e:
+            self.logger.warning(f"📧 ❌ Email notification error: {e}")
+            return {
+                "email_status": "error",
+                "error": str(e),
+                "workflow_continues": True
             }
 
     async def _handle_mcp_query(self, query: str) -> Dict[str, Any]:
