@@ -1170,17 +1170,19 @@
         // Show add agent dialog
         function showAddAgentDialog() {
             document.getElementById('addAgentModal').style.display = 'block';
-            document.getElementById('agentUrl').focus();
-            // Clear previous messages
+            document.getElementById('agentName').focus();
+            // Clear previous messages and inputs
             document.getElementById('addAgentError').style.display = 'none';
             document.getElementById('addAgentSuccess').style.display = 'none';
             document.getElementById('testResult').style.display = 'none';
+            document.getElementById('agentName').value = '';
             document.getElementById('agentUrl').value = '';
         }
 
         // Test agent URL function
         async function testAgentUrl() {
             const urlInput = document.getElementById('agentUrl');
+            const nameInput = document.getElementById('agentName');
             const testBtn = document.getElementById('testUrlBtn');
             const testResult = document.getElementById('testResult');
             
@@ -1216,32 +1218,37 @@
                 if (response.ok) {
                     const agentCard = await response.json();
                     
-                    // Basic validation
-                    const requiredFields = ['name', 'description', 'version'];
-                    const missingFields = requiredFields.filter(field => !agentCard[field]);
-                    
-                    if (missingFields.length > 0) {
-                        throw new Error(`Agent card missing required fields: ${missingFields.join(', ')}`);
+                    // If agent card has a name and user hasn't entered one, suggest it
+                    if (agentCard.name && !nameInput.value.trim()) {
+                        nameInput.value = agentCard.name;
                     }
                     
                     testResult.className = 'test-result success';
                     testResult.innerHTML = `
                         <i class="fas fa-check-circle"></i> 
-                        <strong>Agent found!</strong><br>
-                        <strong>Name:</strong> ${agentCard.name}<br>
-                        <strong>Description:</strong> ${agentCard.description}<br>
-                        <strong>Version:</strong> ${agentCard.version}
+                        <strong>Agent is online and responding!</strong><br>
+                        <strong>Name:</strong> ${agentCard.name || 'Not specified'}<br>
+                        <strong>Description:</strong> ${agentCard.description || 'Not specified'}<br>
+                        <strong>Version:</strong> ${agentCard.version || 'Not specified'}
                     `;
                 } else {
-                    throw new Error(`Failed to fetch agent card: HTTP ${response.status}`);
+                    // Agent is not responding but we can still add it
+                    testResult.className = 'test-result error';
+                    testResult.innerHTML = `
+                        <i class="fas fa-exclamation-triangle"></i> 
+                        <strong>Agent appears to be offline</strong><br>
+                        Could not fetch agent card from: ${testUrl}<br>
+                        <small>You can still add this agent - it will be marked as offline until it becomes available.</small>
+                    `;
                 }
                 
             } catch (error) {
+                // Network or other error, but we can still add it
                 testResult.className = 'test-result error';
                 testResult.innerHTML = `
                     <i class="fas fa-exclamation-triangle"></i> 
-                    <strong>Test failed:</strong><br>
-                    ${error.message}
+                    <strong>Connection failed:</strong> ${error.message}<br>
+                    <small>You can still add this agent - it will be marked as offline until it becomes available.</small>
                 `;
             } finally {
                 // Re-enable button
@@ -1268,6 +1275,7 @@
         // Add agent function
         async function addAgent() {
             const urlInput = document.getElementById('agentUrl');
+            const nameInput = document.getElementById('agentName');
             const errorDiv = document.getElementById('addAgentError');
             const successDiv = document.getElementById('addAgentSuccess');
             
@@ -1276,9 +1284,15 @@
             successDiv.style.display = 'none';
             
             const agentUrl = urlInput.value.trim();
+            const agentName = nameInput.value.trim();
             
             if (!agentUrl) {
                 showError('Please enter an agent URL.', 'addAgentError');
+                return;
+            }
+            
+            if (!agentName) {
+                showError('Please enter a name for the agent.', 'addAgentError');
                 return;
             }
 
@@ -1288,7 +1302,10 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ url: agentUrl })
+                    body: JSON.stringify({ 
+                        url: agentUrl,
+                        name: agentName
+                    })
                 });
 
                 const result = await response.json();
@@ -1972,6 +1989,20 @@
             </div>
             <div class="modal-body">
                 <div class="form-group">
+                    <label for="agentName">Agent Name</label>
+                    <input 
+                        type="text" 
+                        id="agentName" 
+                        class="form-control" 
+                        placeholder="Enter a custom name for this agent"
+                        onkeydown="handleAddAgentKeyDown(event)"
+                    >
+                    <small class="form-text">
+                        Give this agent a friendly name for easier identification.
+                    </small>
+                </div>
+                
+                <div class="form-group">
                     <label for="agentUrl">Agent URL</label>
                     <div class="input-with-button">
                         <input 
@@ -1987,8 +2018,8 @@
                         </button>
                     </div>
                     <small class="form-text">
-                        Enter the URL of the agent. The system will fetch the agent card from 
-                        <code>/.well-known/agent.json</code> endpoint.
+                        Enter the URL of the agent. The system will try to fetch the agent card from 
+                        <code>/.well-known/agent.json</code> but will add the agent even if it's not available.
                     </small>
                 </div>
                 

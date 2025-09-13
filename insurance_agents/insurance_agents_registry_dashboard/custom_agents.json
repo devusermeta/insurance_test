@@ -1,7 +1,8 @@
 {
-  "communicationagent": {
-    "agentId": "communicationagent",
+  "communication": {
+    "agentId": "communication",
     "url": "http://localhost:8005",
+    "custom_name": "Communication",
     "agent_card": {
       "capabilities": {
         "streaming": false
@@ -41,9 +42,10 @@
         }
       ],
       "url": "http://localhost:8005",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "custom_agent": true
     },
-    "added_timestamp": "2025-09-13T17:36:32.333909",
+    "added_timestamp": "2025-09-13T17:44:28.431801",
     "type": "custom"
   }
 }

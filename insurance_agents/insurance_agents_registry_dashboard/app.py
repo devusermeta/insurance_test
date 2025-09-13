@@ -415,6 +415,7 @@ async def fetch_agent_card_from_url(agent_url: str) -> tuple[bool, Dict, str]:
     """
     Fetch agent card from URL and validate it
     Returns: (success, agent_card_data, error_message)
+    Note: This function now always returns success=True, but agent_card might be empty if agent is offline
     """
     try:
         # Normalize URL (ensure it doesn't end with /)
@@ -429,27 +430,24 @@ async def fetch_agent_card_from_url(agent_url: str) -> tuple[bool, Dict, str]:
                     try:
                         agent_card = await response.json()
                         
-                        # Basic validation
-                        required_fields = ['name', 'description', 'version']
-                        missing_fields = [field for field in required_fields if field not in agent_card]
-                        
-                        if missing_fields:
-                            return False, {}, f"Agent card missing required fields: {', '.join(missing_fields)}"
-                        
                         # Add the URL to the agent card
                         agent_card['url'] = agent_url
                         
                         return True, agent_card, ""
                         
                     except json.JSONDecodeError as e:
-                        return False, {}, f"Invalid JSON in agent card: {e}"
+                        # Return empty agent card with error info
+                        return True, {"url": agent_url, "offline_reason": f"Invalid JSON: {e}"}, f"Invalid JSON in agent card: {e}"
                 else:
-                    return False, {}, f"Failed to fetch agent card: HTTP {response.status}"
+                    # Return empty agent card with status info
+                    return True, {"url": agent_url, "offline_reason": f"HTTP {response.status}"}, f"Agent offline: HTTP {response.status}"
                     
     except aiohttp.ClientError as e:
-        return False, {}, f"Network error: {e}"
+        # Return empty agent card with network error info
+        return True, {"url": agent_url, "offline_reason": f"Network error: {e}"}, f"Network error: {e}"
     except Exception as e:
-        return False, {}, f"Unexpected error: {e}"
+        # Return empty agent card with general error info
+        return True, {"url": agent_url, "offline_reason": f"Error: {e}"}, f"Error: {e}"
 
 async def register_custom_agents():
     """Register all custom agents from storage into the main registry"""
@@ -819,13 +817,17 @@ async def get_agent_card(agent_id: str):
 
 @app.post("/api/agents")
 async def add_custom_agent(request: Request):
-    """Add a custom agent by URL"""
+    """Add a custom agent by URL with optional custom name"""
     try:
         data = await request.json()
         agent_url = data.get("url", "").strip()
+        custom_name = data.get("name", "").strip()
         
         if not agent_url:
             return {"success": False, "error": "Agent URL is required"}
+        
+        if not custom_name:
+            return {"success": False, "error": "Agent name is required"}
         
         # Validate URL format
         if not agent_url.startswith(("http://", "https://")):
@@ -853,15 +855,21 @@ async def add_custom_agent(request: Request):
                 if agent_url == built_in_url:
                     return {"success": False, "error": f"This URL belongs to the built-in agent: {existing_agent.name}"}
         
-        # Fetch and validate agent card
+        # Try to fetch agent card (but don't fail if it's not available)
         success, agent_card, error_msg = await fetch_agent_card_from_url(agent_url)
         
-        if not success:
-            return {"success": False, "error": f"Failed to fetch agent card: {error_msg}"}
+        # Use custom name, or fall back to agent card name, or use a default
+        agent_name = custom_name
+        if not agent_name and agent_card.get("name"):
+            agent_name = agent_card.get("name")
+        if not agent_name:
+            agent_name = f"Custom Agent ({agent_url.split('//')[-1]})"
         
-        # Generate a unique agent ID based on name
-        agent_name = agent_card.get("name", "Unknown Agent")
+        # Generate a unique agent ID based on custom name
         agent_id = agent_name.lower().replace(" ", "_").replace("-", "_")
+        # Remove any special characters
+        import re
+        agent_id = re.sub(r'[^a-z0-9_]', '', agent_id)
         
         # Ensure unique ID
         counter = 1
@@ -870,10 +878,24 @@ async def add_custom_agent(request: Request):
             agent_id = f"{original_id}_{counter}"
             counter += 1
         
+        # Create a basic agent card if none exists
+        if not agent_card or not agent_card.get("name"):
+            agent_card = {
+                "name": agent_name,
+                "description": f"Custom agent at {agent_url}",
+                "version": "unknown",
+                "url": agent_url,
+                "custom_agent": True,
+                "offline_reason": agent_card.get("offline_reason", "Agent card not available")
+            }
+        else:
+            agent_card["custom_agent"] = True
+        
         # Store the custom agent
         custom_agents[agent_id] = {
             "agentId": agent_id,
             "url": agent_url,
+            "custom_name": custom_name,
             "agent_card": agent_card,
             "added_timestamp": datetime.now().isoformat(),
             "type": "custom"
@@ -885,7 +907,7 @@ async def add_custom_agent(request: Request):
             name=agent_name,
             type="custom",
             status="unknown",  # Will be checked in background
-            capabilities=[], # Will be populated from agent card
+            capabilities=[], # Will be populated from agent card if available
             lastActivity=datetime.now().isoformat(),
             currentClaims=[]
         )
@@ -905,7 +927,9 @@ async def add_custom_agent(request: Request):
             "success": True,
             "message": f"Successfully added agent: {agent_name}",
             "agentId": agent_id,
-            "agentName": agent_name
+            "agentName": agent_name,
+            "status": "Agent added successfully. Status will be updated automatically.",
+            "offline_reason": agent_card.get("offline_reason") if agent_card.get("offline_reason") else None
         }
         
     except Exception as e:
