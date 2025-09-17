@@ -27,11 +27,22 @@ class ClaimsVoiceLiveClient {
         this.startBtn = document.getElementById('startBtn');
         this.stopBtn = document.getElementById('stopBtn');
         
-        // Configuration - Pre-configured for claims (hardcoded)
-        this.endpointValue = "https://voice-liveresource.cognitiveservices.azure.com/";
-        this.apiKeyValue = "8HWK9Rh0rN98xrMJmnqC7ExKilopJZ6Qepafo6kkqUJlV1VO8ixeJQQJ99BIACHYHv6XJ3w3AAAAACOGahbN";
-        this.modelValue = "gpt-4o-realtime-preview";  // Use realtime model
-        this.voiceValue = "en-US-JennyMultilingualNeural";  // Valid Azure voice from index.html
+         // Configuration - Use config.js values if available, otherwise defaults
+        console.log('🔍 Checking for config.js variables...', window.AZURE_CONFIG);
+        
+        this.endpointValue = (window.AZURE_CONFIG?.endpoint) || "";
+        this.apiKeyValue = (window.AZURE_CONFIG?.apiKey) || "";
+        this.modelValue = (window.AZURE_CONFIG?.model) || "gpt-4o-realtime-preview";
+        this.voiceValue = (window.AZURE_CONFIG?.voice) || "en-US-JennyMultilingualNeural";
+        
+        // Validate that API key is available
+        if (!this.apiKeyValue) {
+            console.error('❌ No API key found in config.js');
+            console.log('Available config:', window.AZURE_CONFIG);
+        } else {
+            console.log('✅ API key loaded from config.js');
+        }
+        
         
         // Transcript tracking
         this.currentResponse = '';
