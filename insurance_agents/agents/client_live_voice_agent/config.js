@@ -1,55 +1,26 @@
-/**
- * Voice Client Configuration
- * Azure Voice Live API configuration for the A2A Voice Agent
- * This file contains actual API keys and should NOT be committed to version control
- */
+// Configuration file for Azure AI Services and Database connections
+// This file contains actual API keys and should NOT be committed to version control
+// Make sure config.js is in .gitignore
 
-// Azure Voice Live API Configuration (Real credentials from client_live_voice)
-window.VOICE_CONFIG = {
-    // Azure Voice Live API WebSocket endpoint
-    endpoint: 'wss://voice-liveresource.cognitiveservices.azure.com/openai/realtime?api-version=2024-10-01-preview',
-    apiKey: '8HWK9Rh0rN98xrMJmnqC7ExKilopJZ6Qepafo6kkqUJlV1VO8ixeJQQJ99BIACHYHv6XJ3w3AAAAACOGahbN',
-    model: 'gpt-4o-realtime-preview',
-    
-    // Voice Agent Configuration
-    agent: {
-        id: 'client_live_voice_agent',
-        name: 'Voice Insurance Assistant',
-        language: 'en-US',
-        voice: 'en-US-JennyMultilingualNeural'
-    },
-    
-    // Audio Configuration
-    audio: {
-        sampleRate: 24000,
-        channels: 1,
-        format: 'pcm16'
-    },
-    
-    // A2A Agent Integration
-    a2a: {
-        agentUrl: 'http://localhost:8007',
-        agentCardEndpoint: '/.well-known/agent.json'
-    },
-    
-    // Development Configuration
-    debug: true,
-    logLevel: 'info'
+window.AZURE_CONFIG = {
+    // Azure Voice Live API Configuration
+    endpoint: "https://voice-liveresource.cognitiveservices.azure.com/",
+    apiKey: "8HWK9Rh0rN98xrMJmnqC7ExKilopJZ6Qepafo6kkqUJlV1VO8ixeJQQJ99BIACHYHv6XJ3w3AAAAACOGahbN",
+    model: "gpt-4o-realtime-preview",
+    voice: "en-US-JennyMultilingualNeural"
 };
 
-// Configuration validation
-if (window.VOICE_CONFIG.debug) {
-    console.log('Voice configuration loaded with Azure Voice Live API');
-    console.log('Model:', window.VOICE_CONFIG.model);
-    console.log('Voice:', window.VOICE_CONFIG.agent.voice);
-}
+window.COSMOS_CONFIG = {
+    // Cosmos DB Configuration for Claims Data
+    endpoint: "https://macae-cosmos-7dfokqmjfelni.documents.azure.com:443/",
+    key: "AkdZ8vkUxrSm1obmhCgOF50AGM2y7ACLwGfV48vHyXHo0GCm5fov2nLPLIPz8o1pFspk7Dl5QpqHACDbLoFBmw==",
+    database: "insurance",
+    container: "claim_details"
+};
 
-// Export for testing
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = window.VOICE_CONFIG;
-}
+// Legacy naming for compatibility
+window.VOICE_CONFIG = window.AZURE_CONFIG;
 
-// Export for testing
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = window.VOICE_CONFIG;
-}
+console.log('✅ Config loaded - Azure endpoint:', window.AZURE_CONFIG.endpoint);
+console.log('✅ Config loaded - Model:', window.AZURE_CONFIG.model);
+console.log('✅ Config loaded - Voice:', window.AZURE_CONFIG.voice);

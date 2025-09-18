@@ -10,11 +10,14 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 from fastapi import WebSocket, WebSocketDisconnect
 
-# Import conversation tracker (handle both relative and absolute imports)
-try:
-    from .conversation_tracker import conversation_tracker
-except ImportError:
-    from conversation_tracker import conversation_tracker
+# Simple conversation tracker replacement
+class SimpleTracker:
+    def log_event(self, *args, **kwargs): pass
+    def log_user_message(self, *args, **kwargs): pass
+    def log_assistant_message(self, *args, **kwargs): pass
+    def log_system_event(self, *args, **kwargs): pass
+
+conversation_tracker = SimpleTracker()
 
 class VoiceWebSocketHandler:
     """

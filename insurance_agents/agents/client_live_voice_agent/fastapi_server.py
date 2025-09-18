@@ -28,11 +28,25 @@ from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 try:
     from .voice_agent_executor import VoiceAgentExecutor
     from .voice_websocket_handler import voice_websocket_handler
-    from .conversation_tracker import conversation_tracker
 except ImportError:
     from voice_agent_executor import VoiceAgentExecutor
     from voice_websocket_handler import voice_websocket_handler
-    from conversation_tracker import conversation_tracker
+
+# Simple mock conversation tracker since the original was removed during cleanup
+class MockConversationTracker:
+    def get_conversation_stats(self):
+        return {"total_conversations": 0, "active_sessions": 0}
+    
+    def get_recent_sessions(self, limit=10):
+        return []
+    
+    def get_session_history(self, session_id):
+        return []
+    
+    def search_conversations(self, query, limit=10):
+        return []
+
+conversation_tracker = MockConversationTracker()
 
 # Configure logging
 logging.basicConfig(
@@ -150,7 +164,7 @@ class VoiceFastAPIServer:
         async def serve_voice_interface():
             """Serve the voice client interface"""
             try:
-                voice_client_path = Path(__file__).parent / "voice_client.html"
+                voice_client_path = Path(__file__).parent / "claims_voice_client.html"
                 if voice_client_path.exists():
                     return FileResponse(voice_client_path, media_type="text/html")
                 else:
@@ -179,6 +193,45 @@ class VoiceFastAPIServer:
                     raise HTTPException(status_code=404, detail="JavaScript file not found")
             except Exception as e:
                 logger.error(f"Error serving JavaScript: {e}")
+                raise HTTPException(status_code=500, detail="Error serving JavaScript")
+        
+        @self.app.get("/claims_voice_client.js")
+        async def serve_claims_voice_client_js():
+            """Serve the claims voice client JavaScript"""
+            try:
+                js_path = Path(__file__).parent / "claims_voice_client.js"
+                if js_path.exists():
+                    return FileResponse(js_path, media_type="application/javascript")
+                else:
+                    raise HTTPException(status_code=404, detail="Claims voice client JavaScript file not found")
+            except Exception as e:
+                logger.error(f"Error serving claims voice client JavaScript: {e}")
+                raise HTTPException(status_code=500, detail="Error serving JavaScript")
+        
+        @self.app.get("/claims-voice-client.js")
+        async def serve_claims_voice_client_hyphen_js():
+            """Serve the claims-voice-client JavaScript (hyphenated filename)"""
+            try:
+                js_path = Path(__file__).parent / "claims-voice-client.js"
+                if js_path.exists():
+                    return FileResponse(js_path, media_type="application/javascript")
+                else:
+                    raise HTTPException(status_code=404, detail="Claims-voice-client JavaScript file not found")
+            except Exception as e:
+                logger.error(f"Error serving claims-voice-client JavaScript: {e}")
+                raise HTTPException(status_code=500, detail="Error serving JavaScript")
+        
+        @self.app.get("/audio-processor.js")
+        async def serve_audio_processor_js():
+            """Serve the audio processor JavaScript"""
+            try:
+                js_path = Path(__file__).parent / "audio-processor.js"
+                if js_path.exists():
+                    return FileResponse(js_path, media_type="application/javascript")
+                else:
+                    raise HTTPException(status_code=404, detail="Audio processor JavaScript file not found")
+            except Exception as e:
+                logger.error(f"Error serving audio processor JavaScript: {e}")
                 raise HTTPException(status_code=500, detail="Error serving JavaScript")
         
         @self.app.get("/config.js")
@@ -390,6 +443,54 @@ class VoiceFastAPIServer:
                 "websocket_support": True,
                 "a2a_protocol": True
             })
+        
+        # Cosmos DB API endpoints for voice client
+        @self.app.get("/api/claims/{claim_id}")
+        async def get_claim(claim_id: str):
+            """Get specific claim information via A2A agent"""
+            try:
+                if not self.voice_executor:
+                    raise HTTPException(status_code=503, detail="Voice agent not initialized")
+                
+                # Use voice executor to query for claim
+                query = f"Get details for claim {claim_id}"
+                result = await self.voice_executor.process_user_message(query)
+                
+                # Extract claim data from result
+                if "not found" in result.lower() or "no information" in result.lower():
+                    return JSONResponse(content={"error": f"Claim {claim_id} not found"}, status_code=404)
+                
+                # Parse the result to extract claim information
+                # This is a simplified parser - in reality you'd use the structured response
+                return JSONResponse(content={
+                    "claimId": claim_id,
+                    "status": "processed",
+                    "details": result
+                })
+                
+            except Exception as e:
+                logger.error(f"Error getting claim {claim_id}: {e}")
+                return JSONResponse(content={"error": str(e)}, status_code=500)
+        
+        @self.app.get("/api/claims/search")
+        async def search_claims(q: str):
+            """Search claims via A2A agent"""
+            try:
+                if not self.voice_executor:
+                    raise HTTPException(status_code=503, detail="Voice agent not initialized")
+                
+                # Use voice executor to search for claims
+                query = f"Search for claims related to: {q}"
+                result = await self.voice_executor.process_user_message(query)
+                
+                # Return search results
+                return JSONResponse(content={
+                    "results": [{"claimId": "search_result", "details": result}]
+                })
+                
+            except Exception as e:
+                logger.error(f"Error searching claims with query '{q}': {e}")
+                return JSONResponse(content={"error": str(e)}, status_code=500)
     
     async def initialize_agent(self):
         """Initialize the voice agent executor and agent card"""

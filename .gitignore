@@ -18,6 +18,8 @@ ENV/
 .env.local
 .env.*.local
 
+config.js
+
 # Insurance Agents specific
 insurance_agents/**/*.log
 insurance_agents/**/logs/
