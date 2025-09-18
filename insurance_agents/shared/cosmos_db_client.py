@@ -348,6 +348,73 @@ class CosmosDBClient:
                            f"Failed to log workflow step: {str(e)}")
             return False
     
+    async def query_container(self, container_name: str, query: str, parameters: List[Dict] = None) -> List[Dict[str, Any]]:
+        """
+        Execute a SQL query on a specific container
+        
+        Args:
+            container_name: Name of the container to query
+            query: SQL query string
+            parameters: Optional query parameters
+            
+        Returns:
+            List of matching documents
+        """
+        try:
+            self.logger.log("INFO", "COSMOS_QUERY", f"🔍 Querying {container_name}: {query[:100]}...")
+            
+            if not self._initialized:
+                raise Exception("Cosmos client not initialized")
+            
+            container = self.database.get_container_client(container_name)
+            
+            items = list(container.query_items(
+                query=query,
+                parameters=parameters or [],
+                enable_cross_partition_query=True
+            ))
+            
+            self.logger.log("SUCCESS", "COSMOS_QUERY", 
+                           f"✅ Query returned {len(items)} items from {container_name}")
+            return items
+            
+        except Exception as e:
+            self.logger.log("ERROR", "COSMOS_QUERY", 
+                           f"Failed to query {container_name}: {str(e)}")
+            return []
+    
+    async def get_all_claims(self) -> List[Dict[str, Any]]:
+        """Get all claims from the claim_details container"""
+        return await self.query_container('claim_details', 'SELECT * FROM c')
+    
+    async def search_claims(self, search_term: str = None, status: str = None) -> List[Dict[str, Any]]:
+        """
+        Search claims with optional filters
+        
+        Args:
+            search_term: Optional text to search in claim fields
+            status: Optional status filter
+            
+        Returns:
+            List of matching claims
+        """
+        query = "SELECT * FROM c"
+        parameters = []
+        conditions = []
+        
+        if status:
+            conditions.append("c.status = @status")
+            parameters.append({"name": "@status", "value": status})
+        
+        if search_term:
+            conditions.append("(CONTAINS(LOWER(c.claimId), LOWER(@search)) OR CONTAINS(LOWER(c.patientName), LOWER(@search)) OR CONTAINS(LOWER(c.diagnosis), LOWER(@search)))")
+            parameters.append({"name": "@search", "value": search_term})
+        
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        
+        return await self.query_container('claim_details', query, parameters)
+    
     async def check_connection(self) -> bool:
         """Test Cosmos DB connection"""
         try:
@@ -403,3 +470,13 @@ async def log_workflow_step(claim_id: str, step: str, agent: str, status: str, d
     """Convenience function to log workflow steps"""
     client = await get_cosmos_client()
     return await client.log_workflow_step(claim_id, step, agent, status, details)
+
+async def query_claims(search_term: str = None, status: str = None) -> List[Dict[str, Any]]:
+    """Convenience function to search claims"""
+    client = await get_cosmos_client()
+    return await client.search_claims(search_term, status)
+
+async def get_all_claims() -> List[Dict[str, Any]]:
+    """Convenience function to get all claims"""
+    client = await get_cosmos_client()
+    return await client.get_all_claims()

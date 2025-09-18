@@ -193,6 +193,19 @@ class VoiceFastAPIServer:
             except Exception as e:
                 logger.error(f"Error serving config: {e}")
                 raise HTTPException(status_code=500, detail="Error serving config")
+
+        @self.app.get("/database_test.html")
+        async def serve_database_test():
+            """Serve the database test interface"""
+            try:
+                test_path = Path(__file__).parent / "database_test.html"
+                if test_path.exists():
+                    return FileResponse(test_path, media_type="text/html")
+                else:
+                    raise HTTPException(status_code=404, detail="Database test file not found")
+            except Exception as e:
+                logger.error(f"Error serving database test: {e}")
+                raise HTTPException(status_code=500, detail="Error serving database test")
         
         # WebSocket endpoint for Voice Live API conversation tracking
         @self.app.websocket("/ws/voice")
@@ -230,11 +243,30 @@ class VoiceFastAPIServer:
                 
                 logger.info(f"🎙️ Executing agent request: {user_message[:50]}...")
                 
-                # Create a simple request context
+                # Create a proper request context with A2A message structure
                 class SimpleRequestContext:
                     def __init__(self, message, session_id):
-                        self.task = type('Task', (), {'prompt': message})()
+                        import uuid
                         self.session_id = session_id
+                        # Create A2A-compatible message structure with all required attributes
+                        text_part = type('TextPart', (), {'text': message})()
+                        part_with_root = type('Part', (), {
+                            'kind': 'text',
+                            'root': text_part  # A2A framework expects 'root' attribute
+                        })()
+                        
+                        self.message = type('Message', (), {
+                            'role': 'user',
+                            'parts': [part_with_root],
+                            'task_id': str(uuid.uuid4()),  # Add required task_id
+                            'context_id': f"voice-{session_id}",  # Add context_id
+                            'messageId': str(uuid.uuid4())  # Add messageId
+                        })()
+                        self.task = self.message  # For compatibility
+                        self.current_task = None  # Start with no current task
+                        
+                    def get_user_input(self):
+                        return self.message.parts[0].root.text
                 
                 request_context = SimpleRequestContext(user_message, session_id)
                 
@@ -242,9 +274,29 @@ class VoiceFastAPIServer:
                 response_text = ""
                 try:
                     async for event in self.voice_executor.execute(request_context):
-                        if hasattr(event, 'artifact') and hasattr(event.artifact, 'content'):
-                            response_text = event.artifact.content
-                            break
+                        if hasattr(event, 'artifact'):
+                            # Check for artifact content in various structures
+                            if hasattr(event.artifact, 'content'):
+                                response_text = event.artifact.content
+                                break
+                            elif hasattr(event.artifact, 'text'):
+                                response_text = event.artifact.text
+                                break
+                            elif hasattr(event.artifact, 'parts') and event.artifact.parts:
+                                # A2A framework uses parts structure
+                                part = event.artifact.parts[0]
+                                if hasattr(part, 'text'):
+                                    response_text = part.text
+                                    break
+                                elif hasattr(part, 'content'):
+                                    response_text = part.content
+                                    break
+                                elif hasattr(part, 'root') and hasattr(part.root, 'text'):
+                                    response_text = part.root.text
+                                    break
+                                elif hasattr(part, 'root') and hasattr(part.root, 'content'):
+                                    response_text = part.root.content
+                                    break
                     
                     # If no response collected, provide fallback
                     if not response_text:

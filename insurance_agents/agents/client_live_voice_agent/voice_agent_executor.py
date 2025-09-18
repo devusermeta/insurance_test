@@ -30,6 +30,7 @@ from dotenv import load_dotenv
 
 # Shared utilities
 from shared.mcp_chat_client import enhanced_mcp_chat_client
+from shared.cosmos_db_client import get_cosmos_client, query_claims, get_all_claims
 
 # Import conversation tracker (handle both relative and absolute imports)
 try:
@@ -263,15 +264,25 @@ You have access to MCP tools for database queries and document processing.
     
     async def execute(self, request_context: RequestContext) -> AsyncGenerator[Any, None]:
         """Execute voice agent request with conversation tracking"""
+        import uuid  # Import uuid at the top of the function
+        
         self.logger.info("🔄 Voice Agent execute called - Processing voice interaction")
         
         try:
             # Extract request details
             task = request_context.task
-            user_message = task.prompt if hasattr(task, 'prompt') else str(task)
+            
+            # Extract text from our custom Message object
+            if hasattr(task, 'parts') and task.parts:
+                user_message = task.parts[0].root.text
+            elif hasattr(task, 'prompt'):
+                user_message = task.prompt
+            else:
+                user_message = str(task)
+                
             session_id = getattr(request_context, 'session_id', str(uuid.uuid4())[:8])
             
-            self.logger.info(f"🎙️ Processing voice request for session {session_id}")
+            self.logger.info(f"🎙️ Processing voice request: '{user_message}' for session {session_id}")
             
             # Start conversation tracking session if not active
             if not conversation_tracker.current_session_id:
@@ -291,15 +302,48 @@ You have access to MCP tools for database queries and document processing.
                 }
             )
             
-            # Create response task
-            response_task = new_task("Voice interaction response")
+            # Create response task using the request context message
+            task = request_context.current_task
+            if not task:
+                # Instead of using new_task() which expects proper A2A Message objects,
+                # create a simple task manually for our voice agent
+                
+                # Create a minimal task object without using new_task()
+                task = type('SimpleTask', (), {
+                    'id': str(uuid.uuid4()),
+                    'context_id': f"voice-{session_id}",
+                    'status': TaskStatus(state=TaskState.submitted),
+                    'task_id': str(uuid.uuid4())
+                })()
+            
+            response_task = task
             response_task.status = TaskStatus(state=TaskState.working)
             
             # Process with Azure AI Voice Agent if available
+            self.logger.info(f"🔍 Checking Azure AI availability: agent={bool(self.azure_voice_agent)}, thread={bool(self.current_thread)}")
             if self.azure_voice_agent and self.current_thread:
-                response_text = await self._process_with_azure_voice_agent(user_message, session_id)
+                self.logger.info("🤖 Using Azure AI Voice Agent processing path")
+                try:
+                    response_text = await self._process_with_azure_voice_agent(user_message, session_id)
+                    
+                    # Only enhance if Azure AI actually worked
+                    if response_text and not response_text.startswith("I'm ready to help"):
+                        # Enhance Azure AI response with database data if needed
+                        self.logger.info("🔍 Attempting to enhance Azure AI response with database data")
+                        enhanced_response = await self._enhance_response_with_mcp(user_message, response_text, session_id)
+                        response_text = enhanced_response
+                        self.logger.info(f"📝 Final enhanced response: {response_text[:100]}...")
+                    else:
+                        # Azure AI didn't work properly, use fallback directly
+                        self.logger.info("📱 Azure AI response insufficient, using Direct Cosmos fallback")
+                        response_text = await self._fallback_voice_processing(user_message, session_id)
+                except Exception as e:
+                    self.logger.error(f"❌ Azure AI processing failed: {e}")
+                    self.logger.info("📱 Using Direct Cosmos fallback due to Azure AI failure")
+                    response_text = await self._fallback_voice_processing(user_message, session_id)
             else:
-                # Fallback processing
+                # Fallback processing with Direct Cosmos DB integration
+                self.logger.info("📱 Using fallback processing path (no Azure AI)")
                 response_text = await self._fallback_voice_processing(user_message, session_id)
             
             # Log the agent response
@@ -315,8 +359,9 @@ You have access to MCP tools for database queries and document processing.
             
             # Create response artifact
             response_artifact = new_text_artifact(
-                content=response_text,
-                title="Voice Response"
+                name='voice_response',
+                description='Voice agent response with database integration',
+                text=response_text,
             )
             
             # Update task with response
@@ -326,12 +371,17 @@ You have access to MCP tools for database queries and document processing.
             # Yield response events
             yield TaskStatusUpdateEvent(
                 task_id=response_task.task_id,
-                status=TaskStatus(state=TaskState.completed)
+                contextId=getattr(request_context.message, 'context_id', f"voice-{session_id}"),
+                status=TaskStatus(state=TaskState.completed),
+                final=True
             )
             
             yield TaskArtifactUpdateEvent(
                 task_id=response_task.task_id,
-                artifact=response_artifact
+                contextId=getattr(request_context.message, 'context_id', f"voice-{session_id}"),
+                artifact=response_artifact,
+                append=False,
+                last_chunk=True
             )
             
             self.logger.info(f"✅ Voice interaction completed for session {session_id}")
@@ -352,12 +402,25 @@ You have access to MCP tools for database queries and document processing.
             )
             
             # Yield error response
-            error_task = new_task("Voice error response")
+            if 'request_context' in locals() and hasattr(request_context, 'current_task') and request_context.current_task:
+                error_task = request_context.current_task
+            else:
+                # Create minimal error response without new_task to avoid the same error
+                yield TaskStatusUpdateEvent(
+                    task_id="error_task",
+                    contextId=getattr(request_context.message, 'context_id', "voice-error") if 'request_context' in locals() and hasattr(request_context, 'message') else "voice-error",
+                    status=TaskStatus(state=TaskState.failed),
+                    final=True
+                )
+                return
+            
             error_task.status = TaskStatus(state=TaskState.failed)
             
             yield TaskStatusUpdateEvent(
                 task_id=error_task.task_id,
-                status=TaskStatus(state=TaskState.failed)
+                contextId=getattr(request_context.message, 'context_id', "voice-error"),
+                status=TaskStatus(state=TaskState.failed),
+                final=True
             )
     
     async def _process_with_azure_voice_agent(self, user_message: str, session_id: str) -> str:
@@ -398,25 +461,55 @@ You have access to MCP tools for database queries and document processing.
                     response_message = messages.data[0]
                     if response_message.content:
                         response_text = response_message.content[0].text.value
-                        self.logger.info(f"✅ Azure AI Voice Agent response generated")
+                        self.logger.info(f"✅ Azure AI Voice Agent response: {response_text[:100]}...")
                         return response_text
             
-            self.logger.warning("⚠️ Azure AI Voice Agent did not generate response, using fallback")
-            return await self._fallback_voice_processing(user_message, session_id)
+            self.logger.warning("⚠️ Azure AI Voice Agent did not generate response")
+            return ""
             
         except Exception as e:
             self.logger.error(f"❌ Error processing with Azure AI Voice Agent: {e}")
-            return await self._fallback_voice_processing(user_message, session_id)
+            return ""
     
     async def _fallback_voice_processing(self, user_message: str, session_id: str) -> str:
-        """Fallback voice processing when Azure AI is not available"""
-        self.logger.info("📱 Using fallback voice processing")
+        """Enhanced fallback voice processing with Direct Cosmos DB (primary) and MCP (fallback)"""
+        self.logger.info("📱 Using enhanced fallback voice processing with Direct Cosmos DB + MCP")
         
-        # Simple pattern matching for common insurance requests
+        # PRIMARY: Try direct Cosmos DB operations first
+        try:
+            self.logger.info("🔍 Attempting direct Cosmos DB query...")
+            cosmos_response = await self._try_direct_cosmos_query(user_message, session_id)
+            if cosmos_response and len(cosmos_response.strip()) > 20:  # Got meaningful response
+                self.logger.info("✅ Direct Cosmos query successful, returning database results")
+                return cosmos_response
+            else:
+                self.logger.warning(f"⚠️ Direct Cosmos query returned insufficient data: '{cosmos_response[:50] if cosmos_response else 'None'}'")
+        except Exception as e:
+            self.logger.warning(f"⚠️ Direct Cosmos query failed, trying MCP fallback: {e}")
+        
+        # FALLBACK: Try MCP integration as secondary option
+        try:
+            self.logger.info("🔍 Attempting MCP query as fallback...")
+            mcp_response = await self._try_mcp_query(user_message, session_id)
+            if mcp_response and len(mcp_response.strip()) > 20:  # Got meaningful response
+                self.logger.info("✅ MCP fallback query successful, returning database results")
+                return mcp_response
+            else:
+                self.logger.warning(f"⚠️ MCP query returned insufficient data: '{mcp_response[:50] if mcp_response else 'None'}'")
+        except Exception as e:
+            self.logger.warning(f"⚠️ MCP query failed, using pattern matching: {e}")
+        
+        # LAST RESORT: Pattern matching for common insurance requests
         message_lower = user_message.lower()
         
         if any(word in message_lower for word in ['claim', 'status', 'number']):
             return "I can help you check your claim status. To look up your claim, I'll need your claim number. Can you provide that?"
+        
+        elif any(word in message_lower for word in ['vehicle', 'car', 'auto', 'toyota', 'honda', 'ford']):
+            return "I can help you find vehicle information in our database. What specific vehicle details are you looking for?"
+        
+        elif any(word in message_lower for word in ['database', 'data', 'available', 'container']):
+            return "I can search our insurance database for claims, vehicles, and policy information. What would you like me to look up?"
         
         elif any(word in message_lower for word in ['deductible', 'premium', 'coverage']):
             return "I'd be happy to explain insurance terms. Which specific term would you like me to explain?"
@@ -429,6 +522,179 @@ You have access to MCP tools for database queries and document processing.
         
         else:
             return "I'm your voice assistant for insurance help. I can check claim status, explain insurance terms, and help with documents. How can I assist you today?"
+
+    async def _enhance_response_with_mcp(self, user_message: str, azure_response: str, session_id: str) -> str:
+        """Enhance Azure AI response with Direct Cosmos DB (primary) and MCP (fallback) data when relevant"""
+        try:
+            self.logger.info(f"🔍 _enhance_response_with_mcp called with Azure response: {azure_response[:100]}...")
+            
+            # Check if the user is asking for specific data that might be in the database
+            message_lower = user_message.lower()
+            data_keywords = ['claim', 'vehicle', 'database', 'data', 'status', 'find', 'search', 'lookup']
+            
+            if any(keyword in message_lower for keyword in data_keywords):
+                self.logger.info("🔍 User query seems to require database lookup, trying Direct Cosmos first...")
+                
+                # PRIMARY: Try direct Cosmos DB query
+                cosmos_response = await self._try_direct_cosmos_query(user_message, session_id)
+                if cosmos_response and len(cosmos_response.strip()) > 20:
+                    self.logger.info("✅ Enhanced Azure response with Direct Cosmos data")
+                    enhanced = f"{azure_response}\n\nBased on our database search:\n{cosmos_response}"
+                    self.logger.info(f"📝 Final enhanced response: {enhanced[:150]}...")
+                    return enhanced
+                else:
+                    self.logger.warning(f"⚠️ Direct Cosmos query returned insufficient data, trying MCP fallback...")
+                
+                # FALLBACK: Try MCP query
+                mcp_response = await self._try_mcp_query(user_message, session_id)
+                if mcp_response and len(mcp_response.strip()) > 20:
+                    self.logger.info("✅ Enhanced Azure response with MCP fallback data")
+                    enhanced = f"{azure_response}\n\nBased on our database search:\n{mcp_response}"
+                    self.logger.info(f"📝 Final enhanced response: {enhanced[:150]}...")
+                    return enhanced
+                else:
+                    self.logger.warning(f"⚠️ MCP query also returned insufficient data: '{mcp_response[:50] if mcp_response else 'None'}'")
+            else:
+                self.logger.info("ℹ️ No database keywords detected, skipping database enhancement")
+            
+            return azure_response
+            
+        except Exception as e:
+            self.logger.warning(f"⚠️ Could not enhance response with database data: {e}")
+            return azure_response
+
+    async def _try_direct_cosmos_query(self, user_message: str, session_id: str) -> str:
+        """Try to answer user query using direct Cosmos DB operations"""
+        try:
+            self.logger.info(f"🔗 Attempting direct Cosmos query for: {user_message[:50]}...")
+            
+            # Analyze user intent for database operations
+            message_lower = user_message.lower()
+            
+            # Check for specific claim ID queries FIRST (higher priority)
+            import re
+            claim_pattern = r'(IP-\d+|OP-\d+)'
+            match = re.search(claim_pattern, user_message, re.IGNORECASE)
+            
+            if match:
+                claim_id = match.group(1).upper()
+                self.logger.info(f"🔍 Searching for specific claim: {claim_id}")
+                
+                # Search for specific claim
+                claims = await query_claims(search_term=claim_id)
+                
+                if claims:
+                    claim = claims[0]
+                    response = f"Found claim {claim_id}: Patient {claim.get('patientName', 'Unknown')}, Status: {claim.get('status', 'Unknown')}, Diagnosis: {claim.get('diagnosis', 'No diagnosis')}"
+                    
+                    # Log the direct Cosmos interaction
+                    conversation_tracker.log_system_event(
+                        event="Direct Cosmos specific claim query",
+                        event_metadata={
+                            "query": user_message,
+                            "claim_id": claim_id,
+                            "session_id": session_id,
+                            "found": True,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    )
+                    
+                    return response
+                else:
+                    return f"Claim {claim_id} not found in the database."
+            
+            # Check for general claims-related queries
+            elif any(word in message_lower for word in ['claim', 'claims', 'database', 'data']):
+                self.logger.info("🔍 Detected general claims query, fetching from Cosmos DB...")
+                
+                # Get all claims directly from Cosmos
+                claims = await get_all_claims()
+                
+                if claims:
+                    self.logger.info(f"✅ Direct Cosmos query successful: {len(claims)} claims found")
+                    
+                    # Format the response
+                    response_parts = ["The database contains the following insurance claims:"]
+                    
+                    for i, claim in enumerate(claims[:10], 1):  # Limit to first 10 for response size
+                        claim_id = claim.get('claimId', 'Unknown')
+                        patient_name = claim.get('patientName', 'Unknown')
+                        status = claim.get('status', 'Unknown')
+                        diagnosis = claim.get('diagnosis', 'No diagnosis')
+                        
+                        response_parts.append(f"{i}. **Claim ID: {claim_id}** - {patient_name}, Status: {status}. Diagnosis: {diagnosis}")
+                    
+                    if len(claims) > 10:
+                        response_parts.append(f"\n...and {len(claims) - 10} more claims in the database.")
+                    
+                    response = "\n\n".join(response_parts)
+                    
+                    # Log the direct Cosmos interaction
+                    conversation_tracker.log_system_event(
+                        event="Direct Cosmos query executed",
+                        event_metadata={
+                            "query": user_message,
+                            "session_id": session_id,
+                            "claims_found": len(claims),
+                            "response_length": len(response),
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    )
+                    
+                    return response
+                else:
+                    self.logger.warning("📭 No claims found in Cosmos DB")
+                    return "No insurance claims found in the database."
+            
+            self.logger.info("📭 Query doesn't match known patterns for direct Cosmos operations")
+            return ""
+                
+        except Exception as e:
+            self.logger.error(f"❌ Direct Cosmos query failed with exception: {e}")
+            import traceback
+            self.logger.error(f"📊 Full traceback: {traceback.format_exc()}")
+            return ""
+
+    async def _try_mcp_query(self, user_message: str, session_id: str) -> str:
+        """Try to answer user query using MCP tools"""
+        try:
+            self.logger.info(f"🔗 Attempting MCP query for: {user_message[:50]}...")
+            
+            if not self.mcp_client:
+                self.logger.warning("⚠️ MCP client not available")
+                return ""
+            
+            self.logger.info(f"✅ MCP client available: {type(self.mcp_client)}")
+            
+            # Use the MCP client to query the database
+            self.logger.info("🔍 Calling mcp_client.query_cosmos_data...")
+            response = await self.mcp_client.query_cosmos_data(user_message)
+            self.logger.info(f"📊 MCP raw response: {response[:200] if response else 'None'}...")
+            
+            if response:
+                self.logger.info(f"✅ MCP query successful: {len(response)} characters returned")
+                
+                # Log the MCP interaction
+                conversation_tracker.log_system_event(
+                    event="MCP query executed",
+                    event_metadata={
+                        "query": user_message,
+                        "session_id": session_id,
+                        "response_length": len(response),
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+                
+                return response
+            else:
+                self.logger.info("📭 MCP query returned empty response")
+                return ""
+                
+        except Exception as e:
+            self.logger.error(f"❌ MCP query failed with exception: {e}")
+            import traceback
+            self.logger.error(f"📊 Full traceback: {traceback.format_exc()}")
+            return ""
 
     async def cancel(self, task_id: str) -> None:
         """Cancel a running task - required by AgentExecutor abstract class"""
