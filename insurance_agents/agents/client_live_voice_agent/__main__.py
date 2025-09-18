@@ -19,7 +19,16 @@ from a2a.server.apps import A2AStarletteApplication
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore, InMemoryPushNotificationConfigStore, BasePushNotificationSender
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
-from voice_agent_executor import VoiceAgentExecutor
+
+# Import voice components (handle both relative and absolute imports)
+try:
+    from .voice_agent_executor import VoiceAgentExecutor
+    from .conversation_tracker import conversation_tracker
+except ImportError:
+    from voice_agent_executor import VoiceAgentExecutor
+    from conversation_tracker import conversation_tracker
+
+from starlette.middleware.cors import CORSMiddleware
 
 # Configure logging
 logging.basicConfig(
@@ -124,12 +133,12 @@ async def main():
         
         logger.info("✅ Voice Agent initialized successfully")
         logger.info("🎤 Ready to accept voice interactions on http://localhost:8007")
+        logger.info("📝 Conversation tracking enabled - logs saved to voice_chat.json")
         
         # Build the server app
         app = server.build()
         
         # Add CORS middleware to allow frontend connections
-        from starlette.middleware.cors import CORSMiddleware
         app.add_middleware(
             CORSMiddleware,
             allow_origins=["*"],  # Allow all origins for development

@@ -31,6 +31,12 @@ from dotenv import load_dotenv
 # Shared utilities
 from shared.mcp_chat_client import enhanced_mcp_chat_client
 
+# Import conversation tracker (handle both relative and absolute imports)
+try:
+    from .conversation_tracker import conversation_tracker
+except ImportError:
+    from conversation_tracker import conversation_tracker
+
 # Load environment variables
 load_dotenv()
 
@@ -118,6 +124,14 @@ class VoiceAgentExecutor(AgentExecutor):
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
+        
+        # Suppress verbose Azure client logging
+        logging.getLogger("azure").setLevel(logging.WARNING)
+        logging.getLogger("azure.core").setLevel(logging.WARNING)
+        logging.getLogger("azure.identity").setLevel(logging.WARNING)
+        logging.getLogger("azure.ai").setLevel(logging.WARNING)
+        logging.getLogger("urllib3").setLevel(logging.WARNING)
+        
         return logger
     
     def get_or_create_azure_voice_agent(self):
@@ -248,7 +262,7 @@ You have access to MCP tools for database queries and document processing.
             self.logger.info("📱 Using fallback voice processing (Azure AI not available)")
     
     async def execute(self, request_context: RequestContext) -> AsyncGenerator[Any, None]:
-        """Execute voice agent request"""
+        """Execute voice agent request with conversation tracking"""
         self.logger.info("🔄 Voice Agent execute called - Processing voice interaction")
         
         try:
@@ -259,12 +273,27 @@ You have access to MCP tools for database queries and document processing.
             
             self.logger.info(f"🎙️ Processing voice request for session {session_id}")
             
-            # Create response task
-            response_task = new_task(
-                task_id=str(uuid.uuid4()),
-                description="Voice interaction response",
-                status=TaskStatus.IN_PROGRESS
+            # Start conversation tracking session if not active
+            if not conversation_tracker.current_session_id:
+                conversation_tracker.start_session({
+                    "agent_type": "client_live_voice_agent",
+                    "session_source": "a2a_request",
+                    "user_session_id": session_id
+                })
+            
+            # Log the incoming user message
+            conversation_tracker.log_voice_interaction(
+                transcript=user_message,
+                audio_metadata={
+                    "session_id": session_id,
+                    "request_time": datetime.now().isoformat(),
+                    "agent": "client_live_voice_agent"
+                }
             )
+            
+            # Create response task
+            response_task = new_task("Voice interaction response")
+            response_task.status = TaskStatus(state=TaskState.working)
             
             # Process with Azure AI Voice Agent if available
             if self.azure_voice_agent and self.current_thread:
@@ -273,6 +302,17 @@ You have access to MCP tools for database queries and document processing.
                 # Fallback processing
                 response_text = await self._fallback_voice_processing(user_message, session_id)
             
+            # Log the agent response
+            conversation_tracker.log_agent_response(
+                response=response_text,
+                response_metadata={
+                    "session_id": session_id,
+                    "response_time": datetime.now().isoformat(),
+                    "agent": "client_live_voice_agent",
+                    "azure_ai_used": bool(self.azure_voice_agent and self.current_thread)
+                }
+            )
+            
             # Create response artifact
             response_artifact = new_text_artifact(
                 content=response_text,
@@ -280,13 +320,13 @@ You have access to MCP tools for database queries and document processing.
             )
             
             # Update task with response
-            response_task.status = TaskStatus.COMPLETED
+            response_task.status = TaskStatus(state=TaskState.completed)
             response_task.artifacts = [response_artifact]
             
             # Yield response events
             yield TaskStatusUpdateEvent(
                 task_id=response_task.task_id,
-                status=TaskStatus.COMPLETED
+                status=TaskStatus(state=TaskState.completed)
             )
             
             yield TaskArtifactUpdateEvent(
@@ -301,16 +341,23 @@ You have access to MCP tools for database queries and document processing.
             import traceback
             traceback.print_exc()
             
-            # Yield error response
-            error_task = new_task(
-                task_id=str(uuid.uuid4()),
-                description="Voice error response",
-                status=TaskStatus.FAILED
+            # Log the error event
+            conversation_tracker.log_system_event(
+                event=f"Error in voice agent execution: {str(e)}",
+                event_metadata={
+                    "error_type": type(e).__name__,
+                    "session_id": session_id if 'session_id' in locals() else "unknown",
+                    "timestamp": datetime.now().isoformat()
+                }
             )
+            
+            # Yield error response
+            error_task = new_task("Voice error response")
+            error_task.status = TaskStatus(state=TaskState.failed)
             
             yield TaskStatusUpdateEvent(
                 task_id=error_task.task_id,
-                status=TaskStatus.FAILED
+                status=TaskStatus(state=TaskState.failed)
             )
     
     async def _process_with_azure_voice_agent(self, user_message: str, session_id: str) -> str:
@@ -386,6 +433,17 @@ You have access to MCP tools for database queries and document processing.
     async def cancel(self, task_id: str) -> None:
         """Cancel a running task - required by AgentExecutor abstract class"""
         self.logger.info(f"🚫 Cancelling voice task: {task_id}")
+        
+        # Log cancellation event
+        conversation_tracker.log_system_event(
+            event=f"Task cancelled: {task_id}",
+            event_metadata={
+                "task_id": task_id,
+                "timestamp": datetime.now().isoformat(),
+                "action": "cancel"
+            }
+        )
+        
         # Implementation for task cancellation
         # For voice agents, we might need to stop audio streams or ongoing Azure AI operations
         # For now, implement as placeholder to satisfy abstract class requirement
@@ -394,5 +452,17 @@ You have access to MCP tools for database queries and document processing.
     def cleanup(self):
         """Clean up resources when shutting down"""
         self.logger.info("🧹 Cleaning up Voice Agent Executor resources...")
+        
+        # End current conversation session
+        if conversation_tracker.current_session_id:
+            conversation_tracker.log_system_event(
+                event="Voice agent shutting down",
+                event_metadata={
+                    "timestamp": datetime.now().isoformat(),
+                    "action": "cleanup"
+                }
+            )
+            conversation_tracker.end_session()
+        
         # Add cleanup logic for Azure connections, audio resources, etc.
         pass

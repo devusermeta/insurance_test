@@ -10,6 +10,8 @@ class VoiceInsuranceClient {
         this.isRecording = false;
         this.agentInfo = null;
         this.conversationHistory = [];
+        this.sessionId = this.generateSessionId();
+        this.conversationWebSocket = null;
         
         // UI Elements
         this.statusElement = document.getElementById('status');
@@ -21,6 +23,7 @@ class VoiceInsuranceClient {
         
         this.initializeEventListeners();
         this.loadAgentInfo();
+        this.initializeConversationTracking();
     }
 
     initializeEventListeners() {
@@ -32,7 +35,60 @@ class VoiceInsuranceClient {
             if (this.websocket) {
                 this.websocket.close();
             }
+            if (this.conversationWebSocket) {
+                this.conversationWebSocket.close();
+            }
         });
+    }
+
+    generateSessionId() {
+        return `voice_session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
+
+    initializeConversationTracking() {
+        try {
+            console.log('📝 Initializing conversation tracking...');
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}/ws/voice?session_id=${this.sessionId}`;
+            
+            console.log('🔗 Connecting to conversation tracker:', wsUrl);
+            this.conversationWebSocket = new WebSocket(wsUrl);
+            
+            this.conversationWebSocket.onopen = () => {
+                console.log('✅ Conversation tracking WebSocket connected');
+                this.updateStatus('ready', 'Ready for voice conversation (tracking enabled)');
+            };
+            
+            this.conversationWebSocket.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    console.log('📨 Received from conversation tracker:', message);
+                } catch (e) {
+                    console.log('📨 Received from conversation tracker:', event.data);
+                }
+            };
+            
+            this.conversationWebSocket.onclose = () => {
+                console.log('📝 Conversation tracking WebSocket disconnected');
+            };
+            
+            this.conversationWebSocket.onerror = (error) => {
+                console.error('❌ Conversation tracking WebSocket error:', error);
+            };
+            
+        } catch (error) {
+            console.error('❌ Error initializing conversation tracking:', error);
+        }
+    }
+
+    sendToConversationTracker(message) {
+        if (this.conversationWebSocket && this.conversationWebSocket.readyState === WebSocket.OPEN) {
+            try {
+                this.conversationWebSocket.send(JSON.stringify(message));
+            } catch (error) {
+                console.error('❌ Error sending to conversation tracker:', error);
+            }
+        }
     }
 
     async loadAgentInfo() {
@@ -187,6 +243,9 @@ class VoiceInsuranceClient {
         try {
             const message = JSON.parse(event.data);
             console.log('📥 Received voice message:', message.type);
+            
+            // Send message to conversation tracker
+            this.sendToConversationTracker(message);
             
             switch (message.type) {
                 case 'session.created':

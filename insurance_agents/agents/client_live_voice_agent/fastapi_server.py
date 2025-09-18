@@ -1,0 +1,476 @@
+#!/usr/bin/env python3
+"""
+FastAPI Voice Agent Server with A2A Protocol and WebSocket Support
+Provides both A2A agent endpoints and WebSocket connections for Voice Live API
+"""
+
+import asyncio
+import logging
+import os
+import sys
+from pathlib import Path
+from typing import Dict, Any, Optional
+import json
+
+# Add the parent directory to the path so we can import shared modules
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.cors import CORSMiddleware
+import uvicorn
+
+# A2A Protocol imports
+from a2a.types import AgentCapabilities, AgentCard, AgentSkill
+
+# Import voice components (handle both relative and absolute imports)
+try:
+    from .voice_agent_executor import VoiceAgentExecutor
+    from .voice_websocket_handler import voice_websocket_handler
+    from .conversation_tracker import conversation_tracker
+except ImportError:
+    from voice_agent_executor import VoiceAgentExecutor
+    from voice_websocket_handler import voice_websocket_handler
+    from conversation_tracker import conversation_tracker
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='🎤 [VOICE-AGENT-FASTAPI] %(asctime)s - %(levelname)s - %(message)s',
+    datefmt="%H:%M:%S"
+)
+logger = logging.getLogger(__name__)
+
+# Suppress verbose Azure client logging
+logging.getLogger("azure").setLevel(logging.WARNING)
+logging.getLogger("azure.core").setLevel(logging.WARNING)
+logging.getLogger("azure.identity").setLevel(logging.WARNING)
+logging.getLogger("azure.ai").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+class VoiceFastAPIServer:
+    """FastAPI server with A2A protocol support and WebSocket for Voice Live API"""
+    
+    def __init__(self):
+        self.app = FastAPI(
+            title="Client Live Voice Agent",
+            description="A2A-compliant voice agent with Azure AI Foundry and Voice Live API integration",
+            version="1.0.0"
+        )
+        self.voice_executor = None
+        self.agent_card = None
+        self.setup_middleware()
+        self.setup_routes()
+    
+    def setup_middleware(self):
+        """Setup CORS middleware"""
+        self.app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],  # Allow all origins for development
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    
+    def setup_routes(self):
+        """Setup all routes including A2A endpoints and WebSocket"""
+        
+        # A2A Protocol endpoints
+        @self.app.get("/.well-known/agent.json")
+        async def get_agent_card():
+            """A2A Agent Card endpoint"""
+            if not self.agent_card:
+                raise HTTPException(status_code=503, detail="Agent not initialized")
+            
+            try:
+                # Convert AgentCard to dict dynamically
+                agent_dict = self.agent_card.model_dump()
+                
+                # Convert field names from snake_case to camelCase for A2A compatibility
+                formatted_dict = {
+                    "name": agent_dict.get("name"),
+                    "description": agent_dict.get("description"),
+                    "url": agent_dict.get("url"),
+                    "version": agent_dict.get("version"),
+                    "id": "client_live_voice_agent",  # Add id field for A2A compatibility
+                    "defaultInputModes": agent_dict.get("default_input_modes", []),
+                    "defaultOutputModes": agent_dict.get("default_output_modes", []),
+                    "instructions": "Provides voice-based insurance claims assistance with Azure AI Foundry integration and real-time WebSocket communication",
+                    "capabilities": agent_dict.get("capabilities", {}),
+                    "skills": agent_dict.get("skills", [])
+                }
+                
+                # Convert capabilities if it's an object
+                if hasattr(self.agent_card.capabilities, 'model_dump'):
+                    formatted_dict["capabilities"] = self.agent_card.capabilities.model_dump()
+                
+                # Add custom voice capabilities for testing
+                if "capabilities" not in formatted_dict:
+                    formatted_dict["capabilities"] = {}
+                
+                formatted_dict["capabilities"]["audio"] = True
+                formatted_dict["capabilities"]["voice"] = True
+                formatted_dict["capabilities"]["real_time"] = True
+                
+                # Convert skills if they're objects
+                if self.agent_card.skills:
+                    formatted_dict["skills"] = [
+                        skill.model_dump() if hasattr(skill, 'model_dump') else skill
+                        for skill in self.agent_card.skills
+                    ]
+                
+                return JSONResponse(content=formatted_dict)
+                
+            except Exception as e:
+                logger.error(f"Error creating agent card response: {e}")
+                # Fallback response
+                fallback_dict = {
+                    "name": "ClientLiveVoiceAgent",
+                    "description": "Voice-enabled insurance claims assistant with real-time interaction",
+                    "url": "http://localhost:8007/",
+                    "version": "1.0.0",
+                    "id": "client_live_voice_agent",
+                    "defaultInputModes": ["audio", "text"],
+                    "defaultOutputModes": ["audio", "text"],
+                    "instructions": "Provides voice-based insurance claims assistance with Azure AI Foundry integration",
+                    "capabilities": {
+                        "audio": True,
+                        "vision": False,
+                        "toolUse": True,
+                        "contextState": True,
+                        "streaming": True
+                    },
+                    "skills": []
+                }
+                return JSONResponse(content=fallback_dict)
+        
+        # Voice interface endpoints
+        @self.app.get("/")
+        async def serve_voice_interface():
+            """Serve the voice client interface"""
+            try:
+                voice_client_path = Path(__file__).parent / "voice_client.html"
+                if voice_client_path.exists():
+                    return FileResponse(voice_client_path, media_type="text/html")
+                else:
+                    return HTMLResponse("""
+                    <html>
+                    <head><title>Voice Agent</title></head>
+                    <body>
+                        <h1>Voice Agent Interface</h1>
+                        <p>Voice client interface not found. Please ensure voice_client.html exists.</p>
+                        <p>Agent Card: <a href="/.well-known/agent.json">/.well-known/agent.json</a></p>
+                    </body>
+                    </html>
+                    """)
+            except Exception as e:
+                logger.error(f"Error serving voice interface: {e}")
+                raise HTTPException(status_code=500, detail="Error serving interface")
+        
+        @self.app.get("/voice_client.js")
+        async def serve_voice_client_js():
+            """Serve the voice client JavaScript"""
+            try:
+                js_path = Path(__file__).parent / "voice_client.js"
+                if js_path.exists():
+                    return FileResponse(js_path, media_type="application/javascript")
+                else:
+                    raise HTTPException(status_code=404, detail="JavaScript file not found")
+            except Exception as e:
+                logger.error(f"Error serving JavaScript: {e}")
+                raise HTTPException(status_code=500, detail="Error serving JavaScript")
+        
+        @self.app.get("/config.js")
+        async def serve_config_js():
+            """Serve the configuration JavaScript"""
+            try:
+                config_path = Path(__file__).parent / "config.js"
+                if config_path.exists():
+                    return FileResponse(config_path, media_type="application/javascript")
+                else:
+                    raise HTTPException(status_code=404, detail="Config file not found")
+            except Exception as e:
+                logger.error(f"Error serving config: {e}")
+                raise HTTPException(status_code=500, detail="Error serving config")
+        
+        # WebSocket endpoint for Voice Live API conversation tracking
+        @self.app.websocket("/ws/voice")
+        async def voice_websocket_endpoint(websocket: WebSocket, session_id: str = None):
+            """WebSocket endpoint for Voice Live API conversation tracking"""
+            logger.info(f"🔌 New WebSocket connection attempt for session: {session_id}")
+            
+            connection_id = await voice_websocket_handler.connect(websocket, session_id)
+            logger.info(f"✅ WebSocket connected: {connection_id}")
+            
+            try:
+                await voice_websocket_handler.handle_voice_message(websocket, connection_id)
+            except WebSocketDisconnect:
+                logger.info(f"🔌 WebSocket disconnected: {connection_id}")
+                voice_websocket_handler.disconnect(connection_id)
+            except Exception as e:
+                logger.error(f"❌ WebSocket error for {connection_id}: {e}")
+                voice_websocket_handler.disconnect(connection_id)
+        
+        # A2A Agent execution endpoint (simplified for WebSocket-based voice)
+        @self.app.post("/api/agent/execute")
+        async def execute_agent(request: Request):
+            """Execute agent request (A2A protocol)"""
+            try:
+                if not self.voice_executor:
+                    return JSONResponse(content={
+                        "response": "Voice agent is starting up. Please try again in a moment.",
+                        "session_id": "startup",
+                        "status": "pending"
+                    })
+                
+                request_data = await request.json()
+                user_message = request_data.get("message", "")
+                session_id = request_data.get("session_id", "direct_api")
+                
+                logger.info(f"🎙️ Executing agent request: {user_message[:50]}...")
+                
+                # Create a simple request context
+                class SimpleRequestContext:
+                    def __init__(self, message, session_id):
+                        self.task = type('Task', (), {'prompt': message})()
+                        self.session_id = session_id
+                
+                request_context = SimpleRequestContext(user_message, session_id)
+                
+                # Execute and collect response
+                response_text = ""
+                try:
+                    async for event in self.voice_executor.execute(request_context):
+                        if hasattr(event, 'artifact') and hasattr(event.artifact, 'content'):
+                            response_text = event.artifact.content
+                            break
+                    
+                    # If no response collected, provide fallback
+                    if not response_text:
+                        response_text = f"I'm ready to help with your voice interactions regarding: {user_message}"
+                        
+                except Exception as exec_error:
+                    logger.warning(f"⚠️ Agent execution had issues: {exec_error}")
+                    response_text = f"I understand you're asking about: {user_message}. I'm here to help with your insurance needs."
+                
+                return JSONResponse(content={
+                    "response": response_text,
+                    "session_id": session_id,
+                    "status": "completed"
+                })
+                
+            except Exception as e:
+                logger.error(f"❌ Error executing agent: {e}")
+                return JSONResponse(
+                    status_code=500,
+                    content={
+                        "error": "Agent execution error",
+                        "detail": str(e),
+                        "session_id": request_data.get("session_id", "error") if 'request_data' in locals() else "error",
+                        "status": "failed"
+                    }
+                )
+        
+        # Conversation tracking API endpoints
+        @self.app.get("/api/conversation/stats")
+        async def get_conversation_stats():
+            """Get conversation statistics"""
+            try:
+                stats = conversation_tracker.get_conversation_stats()
+                return JSONResponse(content=stats)
+            except Exception as e:
+                logger.error(f"Error getting conversation stats: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+        
+        @self.app.get("/api/conversation/sessions")
+        async def get_recent_sessions(limit: int = 10):
+            """Get recent conversation sessions"""
+            try:
+                sessions = conversation_tracker.get_recent_sessions(limit)
+                return JSONResponse(content={"sessions": sessions})
+            except Exception as e:
+                logger.error(f"Error getting recent sessions: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+        
+        @self.app.get("/api/conversation/session/{session_id}")
+        async def get_session_history(session_id: str):
+            """Get conversation history for a specific session"""
+            try:
+                history = conversation_tracker.get_session_history(session_id)
+                if history is None:
+                    raise HTTPException(status_code=404, detail="Session not found")
+                return JSONResponse(content=history)
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Error getting session history: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+        
+        @self.app.get("/api/conversation/search")
+        async def search_conversations(query: str, limit: int = 20):
+            """Search conversation history"""
+            try:
+                results = conversation_tracker.search_conversations(query, limit)
+                return JSONResponse(content={"results": results})
+            except Exception as e:
+                logger.error(f"Error searching conversations: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+        
+        @self.app.get("/api/voice/sessions")
+        async def get_active_voice_sessions():
+            """Get active voice WebSocket sessions"""
+            try:
+                sessions = voice_websocket_handler.get_active_sessions()
+                return JSONResponse(content={"active_sessions": sessions})
+            except Exception as e:
+                logger.error(f"Error getting active voice sessions: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+        
+        # Health check endpoint
+        @self.app.get("/api/health")
+        async def health_check():
+            """Health check endpoint"""
+            return JSONResponse(content={
+                "status": "healthy",
+                "agent_initialized": self.voice_executor is not None,
+                "conversation_tracking": True,
+                "websocket_support": True,
+                "a2a_protocol": True
+            })
+    
+    async def initialize_agent(self):
+        """Initialize the voice agent executor and agent card"""
+        try:
+            logger.info("🚀 Starting Client Live Voice Agent...")
+            logger.info("🔧 Port: 8007")
+            logger.info("🎯 Mode: FastAPI Server with A2A Protocol and WebSocket Support")
+            
+            # Create the voice agent executor
+            self.voice_executor = VoiceAgentExecutor()
+            
+            # Initialize the agent
+            await self.voice_executor.initialize()
+            
+            # Create agent capabilities
+            agent_capabilities = AgentCapabilities(
+                streaming=True,
+                extensions=None,
+                push_notifications=None,
+                state_transition_history=None
+            )
+            
+            # Create agent card
+            try:
+                self.agent_card = AgentCard(
+                    name="ClientLiveVoiceAgent",
+                    description="Voice-enabled insurance claims assistant with real-time interaction, Azure AI Foundry integration, and WebSocket support for Voice Live API",
+                    url="http://localhost:8007/",
+                    version="1.0.0",
+                    default_input_modes=['audio', 'text'],
+                    default_output_modes=['audio', 'text'],
+                    capabilities=agent_capabilities,
+                    skills=[
+                        AgentSkill(
+                            id="voice_claims_lookup",
+                            name="Voice Claims Lookup",
+                            description="Voice-based insurance claims lookup and status checking with real-time interaction via WebSocket",
+                            tags=['voice', 'claims', 'lookup', 'real-time', 'azure', 'websocket'],
+                            examples=[
+                                'Check the status of my claim',
+                                'Look up claim number 12345',
+                                'What is the status of my insurance claim?',
+                                'Find details about my recent claim'
+                            ]
+                        ),
+                        AgentSkill(
+                            id="voice_definitions",
+                            name="Voice Insurance Definitions",
+                            description="Voice-based insurance term definitions and explanations with WebSocket support",
+                            tags=['voice', 'definitions', 'explanations', 'insurance', 'terms', 'websocket'],
+                            examples=[
+                                'What is a deductible?',
+                                'Explain what comprehensive coverage means',
+                                'Define collision coverage',
+                                'What does liability insurance cover?'
+                            ]
+                        ),
+                        AgentSkill(
+                            id="voice_document_upload",
+                            name="Voice Document Upload Assistant",
+                            description="Voice-guided document upload assistance for claims processing with real-time guidance",
+                            tags=['voice', 'documents', 'upload', 'guidance', 'claims', 'real-time'],
+                            examples=[
+                                'Help me upload photos of my accident',
+                                'Guide me through document submission',
+                                'What documents do I need for my claim?',
+                                'How do I submit my repair estimates?'
+                            ]
+                        )
+                    ]
+                )
+                
+                logger.info("✅ Agent card created successfully")
+                
+            except Exception as e:
+                logger.error(f"❌ Error creating agent card: {e}")
+                # Create a minimal agent card for fallback
+                self.agent_card = AgentCard(
+                    name="ClientLiveVoiceAgent",
+                    description="Voice-enabled insurance claims assistant",
+                    url="http://localhost:8007/",
+                    version="1.0.0",
+                    default_input_modes=['audio', 'text'],
+                    default_output_modes=['audio', 'text'],
+                    capabilities=agent_capabilities,
+                    skills=[]
+                )
+            
+            logger.info("✅ Voice Agent initialized successfully")
+            logger.info("🎤 Ready to accept voice interactions on http://localhost:8007")
+            logger.info("📝 Conversation tracking enabled - logs saved to voice_chat.json")
+            logger.info("🔌 WebSocket endpoint available at ws://localhost:8007/ws/voice")
+            logger.info("🌐 A2A agent card available at http://localhost:8007/.well-known/agent.json")
+            
+        except Exception as e:
+            logger.error(f"❌ Error initializing voice agent: {e}")
+            raise
+
+def create_app():
+    """Create and configure the FastAPI app"""
+    server = VoiceFastAPIServer()
+    return server
+
+async def startup_event():
+    """Startup event handler"""
+    # Initialize the agent when the app starts
+    app_instance = create_app()
+    await app_instance.initialize_agent()
+    return app_instance.app
+
+def start_server():
+    """Start the voice agent server"""
+    try:
+        # Create the app
+        server = VoiceFastAPIServer()
+        
+        # Run initialization
+        async def init_and_run():
+            await server.initialize_agent()
+            return server.app
+        
+        app = asyncio.run(init_and_run())
+        
+        # Start the server
+        uvicorn.run(app, host="0.0.0.0", port=8007, log_level="info")
+        
+    except KeyboardInterrupt:
+        logger.info("🛑 Voice Agent stopped by user")
+    except Exception as e:
+        logger.error(f"❌ Error starting Voice Agent: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+if __name__ == "__main__":
+    start_server()
