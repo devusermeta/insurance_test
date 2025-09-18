@@ -447,26 +447,24 @@ class VoiceFastAPIServer:
         # Cosmos DB API endpoints for voice client
         @self.app.get("/api/claims/{claim_id}")
         async def get_claim(claim_id: str):
-            """Get specific claim information via A2A agent"""
+            """Get specific claim information directly from Cosmos DB"""
             try:
-                if not self.voice_executor:
-                    raise HTTPException(status_code=503, detail="Voice agent not initialized")
+                from shared.cosmos_db_client import query_claims
                 
-                # Use voice executor to query for claim
-                query = f"Get details for claim {claim_id}"
-                result = await self.voice_executor.process_user_message(query)
+                # Normalize claim ID (add hyphen if missing)
+                normalized_claim_id = claim_id.upper()
+                if not '-' in normalized_claim_id and len(normalized_claim_id) >= 4:
+                    normalized_claim_id = normalized_claim_id[:2] + '-' + normalized_claim_id[2:]
                 
-                # Extract claim data from result
-                if "not found" in result.lower() or "no information" in result.lower():
+                # Query Cosmos DB directly
+                claims = await query_claims(search_term=normalized_claim_id)
+                
+                if not claims:
                     return JSONResponse(content={"error": f"Claim {claim_id} not found"}, status_code=404)
                 
-                # Parse the result to extract claim information
-                # This is a simplified parser - in reality you'd use the structured response
-                return JSONResponse(content={
-                    "claimId": claim_id,
-                    "status": "processed",
-                    "details": result
-                })
+                # Return the first matching claim
+                claim = claims[0]
+                return JSONResponse(content=claim)
                 
             except Exception as e:
                 logger.error(f"Error getting claim {claim_id}: {e}")
@@ -474,18 +472,20 @@ class VoiceFastAPIServer:
         
         @self.app.get("/api/claims/search")
         async def search_claims(q: str):
-            """Search claims via A2A agent"""
+            """Search claims directly from Cosmos DB"""
             try:
-                if not self.voice_executor:
-                    raise HTTPException(status_code=503, detail="Voice agent not initialized")
+                from shared.cosmos_db_client import query_claims, get_all_claims
                 
-                # Use voice executor to search for claims
-                query = f"Search for claims related to: {q}"
-                result = await self.voice_executor.process_user_message(query)
+                if q:
+                    # Search for specific term
+                    claims = await query_claims(search_term=q)
+                else:
+                    # Get all claims if no search term
+                    claims = await get_all_claims()
                 
-                # Return search results
+                # Return search results in expected format
                 return JSONResponse(content={
-                    "results": [{"claimId": "search_result", "details": result}]
+                    "results": claims[:10]  # Limit to first 10 results
                 })
                 
             except Exception as e:
