@@ -19,6 +19,7 @@ ENV/
 .env.*.local
 
 config.js
+config_vla.js
 
 # Insurance Agents specific
 insurance_agents/**/*.log
