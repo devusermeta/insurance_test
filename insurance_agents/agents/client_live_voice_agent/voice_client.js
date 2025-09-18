@@ -100,40 +100,41 @@ class VoiceInsuranceClient {
                 throw new Error('Voice Live API configuration not found. Please check config.js');
             }
             
-            // Create WebSocket connection to Azure Voice Live API
+            // Create WebSocket connection to Azure Voice Live API (OpenAI Realtime format)
             const websocketUrl = window.VOICE_CONFIG.endpoint;
             console.log('🔗 Connecting to:', websocketUrl);
             
-            this.websocket = new WebSocket(websocketUrl);
+            this.websocket = new WebSocket(websocketUrl, 'realtime');
             
-            this.websocket.onopen = () => {
+            // Add authorization header for Azure OpenAI
+            this.websocket.addEventListener('open', () => {
                 console.log('✅ Connected to Azure Voice Live API');
                 this.isConnected = true;
                 this.updateStatus('connected', 'Connected - Voice conversation active');
                 this.startButton.disabled = true;
                 this.stopButton.disabled = false;
                 
-                // Send initial configuration
-                this.sendVoiceConfiguration();
-            };
+                // Send initial session configuration for OpenAI Realtime API
+                this.sendRealtimeConfiguration();
+            });
             
-            this.websocket.onmessage = (event) => {
+            this.websocket.addEventListener('message', (event) => {
                 this.handleVoiceMessage(event);
-            };
+            });
             
-            this.websocket.onclose = () => {
+            this.websocket.addEventListener('close', () => {
                 console.log('🔌 Voice Live API connection closed');
                 this.isConnected = false;
                 this.updateStatus('disconnected', 'Disconnected');
                 this.startButton.disabled = false;
                 this.stopButton.disabled = true;
-            };
+            });
             
-            this.websocket.onerror = (error) => {
+            this.websocket.addEventListener('error', (error) => {
                 console.error('❌ Voice Live API error:', error);
                 this.updateStatus('disconnected', 'Connection error');
                 this.addMessageToConversation('system', 'Voice connection error occurred');
-            };
+            });
             
         } catch (error) {
             console.error('❌ Error starting voice conversation:', error);
@@ -142,50 +143,44 @@ class VoiceInsuranceClient {
         }
     }
 
-    stopVoiceConversation() {
-        if (!this.isConnected) return;
-        
-        console.log('🛑 Stopping voice conversation...');
-        
-        if (this.websocket) {
-            this.websocket.close();
-        }
-        
-        this.isConnected = false;
-        this.updateStatus('disconnected', 'Disconnected');
-        this.startButton.disabled = false;
-        this.stopButton.disabled = true;
-        
-        this.addMessageToConversation('system', 'Voice conversation ended');
-    }
-
-    sendVoiceConfiguration() {
+    sendRealtimeConfiguration() {
         if (!this.websocket || !this.isConnected) return;
         
-        // Send configuration to Azure Voice Live API
-        const config = {
-            type: 'configuration',
-            audio: {
-                input: {
-                    format: 'pcm',
-                    sampleRate: 16000,
-                    channels: 1
+        // Send session configuration for OpenAI Realtime API
+        const sessionConfig = {
+            type: 'session.update',
+            session: {
+                modalities: ['text', 'audio'],
+                instructions: `You are a helpful insurance voice assistant. ${this.agentInfo?.instructions || 'Help users with insurance claims, definitions, and document guidance.'}`,
+                voice: window.VOICE_CONFIG.agent.voice,
+                input_audio_format: 'pcm16',
+                output_audio_format: 'pcm16',
+                input_audio_transcription: {
+                    model: 'whisper-1'
                 },
-                output: {
-                    format: 'pcm',
-                    sampleRate: 16000,
-                    channels: 1
-                }
-            },
-            agent: {
-                id: this.agentInfo?.id || 'client_live_voice_agent',
-                name: this.agentInfo?.name || 'Voice Insurance Assistant',
-                instructions: this.agentInfo?.instructions || 'Provide voice-based insurance assistance'
+                turn_detection: {
+                    type: 'server_vad',
+                    threshold: 0.5,
+                    prefix_padding_ms: 300,
+                    silence_duration_ms: 500
+                },
+                tools: [],
+                tool_choice: 'auto',
+                temperature: 0.8,
+                max_response_output_tokens: 4096
             }
         };
         
-        console.log('📤 Sending voice configuration:', config);
-        this.websocket.send(JSON.stringify(config));
+        console.log('📤 Sending session configuration:', sessionConfig);
+        this.websocket.send(JSON.stringify(sessionConfig));
+        
+        // Send API key for authentication
+        const authMessage = {
+            type: 'auth',
+            api_key: window.VOICE_CONFIG.apiKey
+        };
+        
+        this.websocket.send(JSON.stringify(authMessage));
     }
 
     handleVoiceMessage(event) {
@@ -194,23 +189,35 @@ class VoiceInsuranceClient {
             console.log('📥 Received voice message:', message.type);
             
             switch (message.type) {
-                case 'speech_started':
+                case 'session.created':
+                    this.handleSessionCreated(message);
+                    break;
+                    
+                case 'session.updated':
+                    this.handleSessionUpdated(message);
+                    break;
+                    
+                case 'input_audio_buffer.speech_started':
                     this.handleSpeechStarted(message);
                     break;
                     
-                case 'speech_ended':
+                case 'input_audio_buffer.speech_stopped':
                     this.handleSpeechEnded(message);
                     break;
                     
-                case 'transcript':
+                case 'conversation.item.input_audio_transcription.completed':
                     this.handleTranscript(message);
                     break;
                     
-                case 'response':
-                    this.handleAgentResponse(message);
+                case 'response.audio_transcript.delta':
+                    this.handleAgentResponseDelta(message);
                     break;
                     
-                case 'audio':
+                case 'response.audio_transcript.done':
+                    this.handleAgentResponseComplete(message);
+                    break;
+                    
+                case 'response.audio.delta':
                     this.handleAudioData(message);
                     break;
                     
@@ -227,9 +234,19 @@ class VoiceInsuranceClient {
         }
     }
 
+    handleSessionCreated(message) {
+        console.log('✅ Session created:', message.session?.id);
+        this.addMessageToConversation('system', 'Voice session started - you can now speak');
+    }
+
+    handleSessionUpdated(message) {
+        console.log('🔄 Session updated');
+    }
+
     handleSpeechStarted(message) {
         console.log('🎤 Speech started');
         this.addMessageToConversation('system', 'Listening...');
+        this.currentTranscript = '';
     }
 
     handleSpeechEnded(message) {
@@ -237,24 +254,37 @@ class VoiceInsuranceClient {
     }
 
     handleTranscript(message) {
-        const transcript = message.text || message.transcript || '';
+        const transcript = message.transcript || '';
         console.log('📝 Transcript:', transcript);
         
         if (transcript.trim()) {
             this.addMessageToConversation('user', transcript);
+            
+            // Send to A2A agent for enhanced processing
+            this.sendToA2AAgent(transcript);
         }
     }
 
-    async handleAgentResponse(message) {
-        const response = message.text || message.response || '';
-        console.log('🤖 Agent response:', response);
+    handleAgentResponseDelta(message) {
+        const delta = message.delta || '';
+        
+        if (!this.currentResponse) {
+            this.currentResponse = '';
+        }
+        
+        this.currentResponse += delta;
+        console.log('🤖 Response delta:', delta);
+    }
+
+    handleAgentResponseComplete(message) {
+        const response = this.currentResponse || message.transcript || '';
+        console.log('🤖 Complete response:', response);
         
         if (response.trim()) {
             this.addMessageToConversation('assistant', response);
-            
-            // Send response to A2A agent for processing
-            await this.sendToA2AAgent(response);
         }
+        
+        this.currentResponse = '';
     }
 
     async sendToA2AAgent(userInput) {

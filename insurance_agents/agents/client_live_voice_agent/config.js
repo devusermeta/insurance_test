@@ -1,27 +1,29 @@
 /**
  * Voice Client Configuration
  * Azure Voice Live API configuration for the A2A Voice Agent
+ * This file contains actual API keys and should NOT be committed to version control
  */
 
-// Voice Live API Configuration
+// Azure Voice Live API Configuration (Real credentials from client_live_voice)
 window.VOICE_CONFIG = {
     // Azure Voice Live API WebSocket endpoint
-    // This will be configured in Step 5 with real credentials
-    endpoint: 'wss://eastus.api.azureml.ms/voice/live/v1/chat',
+    endpoint: 'wss://voice-liveresource.cognitiveservices.azure.com/openai/realtime?api-version=2024-10-01-preview',
+    apiKey: '8HWK9Rh0rN98xrMJmnqC7ExKilopJZ6Qepafo6kkqUJlV1VO8ixeJQQJ99BIACHYHv6XJ3w3AAAAACOGahbN',
+    model: 'gpt-4o-realtime-preview',
     
     // Voice Agent Configuration
     agent: {
         id: 'client_live_voice_agent',
         name: 'Voice Insurance Assistant',
         language: 'en-US',
-        voice: 'en-US-AriaNeural'
+        voice: 'en-US-JennyMultilingualNeural'
     },
     
     // Audio Configuration
     audio: {
-        sampleRate: 16000,
+        sampleRate: 24000,
         channels: 1,
-        format: 'pcm'
+        format: 'pcm16'
     },
     
     // A2A Agent Integration
@@ -37,7 +39,14 @@ window.VOICE_CONFIG = {
 
 // Configuration validation
 if (window.VOICE_CONFIG.debug) {
-    console.log('🔧 Voice configuration loaded:', window.VOICE_CONFIG);
+    console.log('Voice configuration loaded with Azure Voice Live API');
+    console.log('Model:', window.VOICE_CONFIG.model);
+    console.log('Voice:', window.VOICE_CONFIG.agent.voice);
+}
+
+// Export for testing
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = window.VOICE_CONFIG;
 }
 
 // Export for testing
